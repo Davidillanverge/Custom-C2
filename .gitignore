@@ -1,0 +1,104 @@
+# =========================
+# Archivos de Python
+# =========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+.eggs/
+*.manifest
+*.spec
+
+# =========================
+# Entornos virtuales
+# =========================
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# =========================
+# Dependencias
+# =========================
+pip-log.txt
+pip-delete-this-directory.txt
+poetry.lock
+Pipfile.lock
+
+# =========================
+# Archivos de compilación / distribución
+# =========================
+build/
+dist/
+wheels/
+*.whl
+*.tar.gz
+*.egg-info/
+
+# =========================
+# Testing
+# =========================
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+.tox/
+.nox/
+
+# =========================
+# Logs y debug
+# =========================
+*.log
+*.pot
+*.mo
+
+# =========================
+# Configuración de IDEs y editores
+# =========================
+# VSCode
+.vscode/
+# PyCharm / IntelliJ
+.idea/
+*.iml
+# Otros
+*.swp
+*.swo
+
+# =========================
+# Archivos de bases de datos locales
+# =========================
+*.db
+*.sqlite3
+
+# =========================
+# Archivos de sistema
+# =========================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# =========================
+# Docker / Contenedores
+# =========================
+*.pid
+*.seed
+*.pid.lock
+
+# =========================
+# Documentación / Notebooks
+# =========================
+.ipynb_checkpoints
+doc/_build/
+docs/_build/
+
