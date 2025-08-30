@@ -1,10 +1,7 @@
 import threading
-from urllib.parse import urlparse
-
-from flask import json, jsonify
 from Models.Listener.http_listener.http_handler import HTTPRequestHandler
 from Models.Listener.listener import Listener
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import HTTPServer
 
 # Implementación HTTP
 class HTTPListener(Listener):

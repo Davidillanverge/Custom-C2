@@ -15,6 +15,8 @@ def get_listeners():
     """
     Obtener todos los Listeners
     ---
+    tags:
+      - Listener
     responses:
       200:
         description: Lista de Listeners
@@ -29,6 +31,8 @@ def get_listener(name):
     """
     Obtener Listener by name
     ---
+    tags:
+      - Listener
     parameters:
       - in: path
         name: name
@@ -51,6 +55,8 @@ def create_listener():
     """
     Crear un Listener
     ---
+    tags:
+      - Listener
     parameters:
       - in: body
         type: body
@@ -92,6 +98,8 @@ def remove_listener():
     """
     Eliminar un Listener
     ---
+    tags:
+      - Listener
     parameters:
       - in: body
         name: body

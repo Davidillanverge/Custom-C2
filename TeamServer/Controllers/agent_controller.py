@@ -17,6 +17,8 @@ def get_agents():
     """
     Obtener todos los Agentes
     ---
+    tags:
+      - Agent
     responses:
       200:
         description: Lista de Agentes
@@ -31,6 +33,8 @@ def get_agent(agent_id):
     """
     Obtener un Agente por ID
     ---
+    tags:
+      - Agent
     parameters:
       - name: agent_id
         in: path
@@ -69,6 +73,8 @@ def delete_agent(agent_id):
     """
     Eliminar un Agente por ID
     ---
+    tags:
+      - Agent
     parameters:
       - name: agent_id
         in: path
@@ -91,6 +97,8 @@ def delete_agent(agent_id):
 def create_agent():
     """Crear un nuevo Agente
     ---
+    tags:
+      - Agent
     parameters:
       - in: body
         name: body
@@ -156,6 +164,8 @@ def create_agent():
 def add_task(agent_id):
     """Añadir una tarea a un Agente
     ---
+    tags:
+      - Agent
     parameters:
       - name: agent_id
         in: path
@@ -203,6 +213,8 @@ def add_task(agent_id):
 def get_tasks(agent_id):
     """Obtener las tareas de un Agente
     ---
+    tags:
+      - Agent 
     parameters:
       - name: agent_id
         in: path
@@ -225,6 +237,8 @@ def get_tasks(agent_id):
 def get_results(agent_id):
     """Obtener los resultados de las tareas de un Agente
     ---
+    tags:
+      - Agent 
     parameters:
       - name: agent_id
         in: path
@@ -247,6 +261,8 @@ def get_results(agent_id):
 def get_result(agent_id, task_id):
     """Obtener el resultado de una tarea
     ---
+    tags:
+      - Agent
     parameters:
       - name: agent_id
         in: path
