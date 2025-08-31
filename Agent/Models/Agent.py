@@ -66,7 +66,6 @@ class Agent:
         
         
     def Work(self):
-        print("Executing tasks...")
         while True:
             if not self.tasks.empty():
                 task = self.get_task()

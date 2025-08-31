@@ -42,6 +42,5 @@ class HTTPCommunicationModule(CommunicationModule):
                 for task in data["tasks"]:
                     task = Task(**task)
                     self.agent.add_task(task)
-                print(data['tasks'])
         return None
 

@@ -11,8 +11,6 @@ class AgentMetadata:
         self.pid = pid
         self.integrity = integrity
         self.arch = arch
-        self.integrity = None
-        self.arch = None
 
     def get_id(self):
         return self.id
