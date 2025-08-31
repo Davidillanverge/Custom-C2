@@ -14,45 +14,64 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
     agent_service = AgentService()
     def do_GET(self):
         if self.path == "/":
-            data = "Hello"
+            data = {"tasks": [{"id" : 1, "command": "whoami", "arguments": [], "file": ""}]}
             self._send_response(data, status=200)
 
     def do_POST(self):
-        if self.path == "/":
-            # Leer Authorization Header
-            auth_header = self.headers.get("Authorization")
-            if not auth_header:
-                self._send_response({"error": "Missing Authorization Header"}, status=401)
-                return
-
-            metadata_encoded = auth_header.split(" ")[1]
-            metadata_json = base64.b64decode(metadata_encoded).decode("utf-8")
-            agent_metadata : AgentMetadata = self.extractAgentMetadata(metadata_json)
-            if agent_metadata is None:
-                self._send_response({"error": "Invalid metadata"}, status=400)
-                return
-            
-            agent =  self.agent_service.get_agent(agent_metadata.get_id())
-            if agent == None:
-                agent: Agent = Agent(metadata=agent_metadata)
-                self.agent_service.add_agent(agent)
-                self._send_response({"message": "Agent created successfully"}, status=201)
-                return
-            
-            agent.check_in()
-            
+        if self.path == "/test":
+            # Handle /test endpoint
             # Leer Results
             content_length = int(self.headers.get("Content-Length", 0))
             if content_length > 0:
                 body_bytes = self.rfile.read(content_length)
                 body_str = body_bytes.decode("utf-8")
-                print(body_str)
-                agent.add_results(self.extractTaskResults(body_str))
+                print("Body string: " + body_str)
+                results = self.extractTaskResults(body_str)
+                for result in results:
+                    print(result.to_dict())
 
-            # Responde with tasks
-            tasks = asyncio.run(agent.get_pendingTasks())
-            self._send_response({"tasks": [task.to_dict() for task in tasks]}, status=200)
+            data = data = {"tasks": [{"id" : 1, "command": "whoami", "arguments": [], "file": ""}, {"id" : 2, "command": "pwd", "arguments": [], "file": ""}]}
+            self._send_response(data, status=200)
+            return
+        
+        if self.path == "/":
+            try:
+                # Leer Authorization Header
+                print(self.headers)
+                auth_header = self.headers.get("Authorization")
+                if not auth_header:
+                    self._send_response({"error": "Missing Authorization Header"}, status=401)
+                    return
 
+                metadata_encoded = auth_header.split(" ")[1]
+                metadata_json = base64.b64decode(metadata_encoded).decode("utf-8")
+                agent_metadata : AgentMetadata = self.extractAgentMetadata(metadata_json)
+                if agent_metadata is None:
+                    self._send_response({"error": "Invalid metadata"}, status=400)
+                    return
+                
+                agent =  self.agent_service.get_agent(agent_metadata.get_id())
+                if agent == None:
+                    agent: Agent = Agent(metadata=agent_metadata)
+                    self.agent_service.add_agent(agent)
+                    self._send_response({"message": "Agent created successfully"}, status=201)
+                    return
+                
+                agent.check_in()
+                
+                # Leer Results
+                content_length = int(self.headers.get("Content-Length", 0))
+                if content_length > 0:
+                    body_bytes = self.rfile.read(content_length)
+                    body_str = body_bytes.decode("utf-8")
+                    print(body_str)
+                    agent.add_results(self.extractTaskResults(body_str))
+
+                # Responde with tasks
+                tasks = asyncio.run(agent.get_pendingTasks())
+                self._send_response({"tasks": [task.to_dict() for task in tasks]}, status=200)
+            except:
+                self._send_response("Internal Error", 500)
 
 
     def _send_response(self, data, status=200):
