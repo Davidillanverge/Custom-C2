@@ -177,6 +177,8 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Agent.cpp" />
+    <ClCompile Include="Shell.cpp" />
+    <ClCompile Include="Whoami.cpp" />
     <ClCompile Include="Helpers.cpp" />
     <ClCompile Include="HttpClient.cpp" />
     <ClCompile Include="HTTPCommunicationModule.cpp" />
@@ -184,6 +186,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Agent.h" />
+    <ClInclude Include="Commands.h" />
     <ClInclude Include="Helpers.h" />
     <ClInclude Include="HttpClient.h" />
     <ClInclude Include="HTTPCommunicationModule.h" />

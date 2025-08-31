@@ -40,6 +40,7 @@ void HTTPCommunicationModule::Checkin(){
 	std::vector<TaskResult> results = agent.getTaskResults();
 	std::string data = "{\"results\":" + arrayTaskResult2json(results) + "}";
 
+	std::cout << "Request Body: " << data << std::endl;
 	//Send POST request with Results
 	HttpResponse response = httpClient.Post(s2ws(Address), Port, L"/", data, headers);
 	std::cout << "Response Body: " << response.body << std::endl;
@@ -52,8 +53,7 @@ void HTTPCommunicationModule::Checkin(){
 
 	//Save Tasks to a list
 	for (int i = 0; i < tasks.size(); i++) {
-		Task task = tasks[i];
-		agent.addTask(task);
+		agent.addTask(tasks[i]);
 	}
 }
 

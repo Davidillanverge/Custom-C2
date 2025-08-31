@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <queue>
+#include <unordered_map>
 #include "Helpers.h"
 
 struct AgentMetadata
@@ -34,19 +35,24 @@ private:
 	AgentMetadata Metadata;
 	std::queue<Task> Tasks;
 	std::queue<TaskResult> Results;
+	std::unordered_map<std::string, std::string(*)(std::string arguments)> Commands;
 
 public:
-	Agent(const AgentMetadata& metadata);
+	Agent();
+
+	std::unordered_map<std::string, std::string(*)(std::string arguments)> loadCommands();
+
+	AgentMetadata generateMetadata();
 
 	AgentMetadata getMetadata();
 
 	void addTask(const Task& task);
 
-	Task& getNextTask();
+	Task getNextTask();
 
 	void addResult(const TaskResult& result);
 
-	TaskResult& getNextResult();
+	TaskResult getNextResult();
 
 	std::vector<TaskResult> getTaskResults();
 
