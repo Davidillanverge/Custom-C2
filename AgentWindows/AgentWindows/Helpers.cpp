@@ -20,43 +20,56 @@ std::string arrayTaskResult2json(const std::vector<TaskResult>& results) {
     return oss.str();
 }
 
+// Helper: quita espacios y comillas
+std::string trim(const std::string& str) {
+    size_t first = str.find_first_not_of(" \t\n\r\"");
+    size_t last = str.find_last_not_of(" \t\n\r\"");
+    if (first == std::string::npos || last == std::string::npos)
+        return "";
+    return str.substr(first, (last - first + 1));
+}
+
+// Parsear JSON muy básico
 Task json2Task(const std::string& json) {
-    Task task;
+    Task task{};
+    size_t pos = 0;
 
-    // Buscar el valor de "id"
-    auto id_pos = json.find("\"id\"");
-    if (id_pos != std::string::npos) {
-        auto colon = json.find(":", id_pos);
-        auto comma = json.find(",", colon);
-        std::string id_str = json.substr(colon + 1, comma - colon - 1);
-        task.id = std::stoi(id_str);
+    // ID
+    pos = json.find("\"id\"");
+    if (pos != std::string::npos) {
+        size_t colon = json.find(":", pos);
+        size_t comma = json.find(",", colon);
+        task.id = std::stoi(trim(json.substr(colon + 1, comma - colon - 1)));
     }
 
-    // Buscar el valor de "command"
-    auto cmd_pos = json.find("\"command\"");
-    if (cmd_pos != std::string::npos) {
-        auto colon = json.find(":", cmd_pos);
-        auto quote1 = json.find("\"", colon + 1);
-        auto quote2 = json.find("\"", quote1 + 1);
-        task.command = json.substr(quote1 + 1, quote2 - quote1 - 1);
+    // command
+    pos = json.find("\"command\"");
+    if (pos != std::string::npos) {
+        size_t colon = json.find(":", pos);
+        size_t comma = json.find(",", colon);
+        task.command = trim(json.substr(colon + 1, comma - colon - 1));
     }
 
-    // Buscar el valor de "arguments"
-    auto args_pos = json.find("\"arguments\"");
-    if (args_pos != std::string::npos) {
-        auto colon = json.find(":", args_pos);
-        auto quote1 = json.find("\"", colon + 1);
-        auto quote2 = json.find("\"", quote1 + 1);
-        task.arguments = json.substr(quote1 + 1, quote2 - quote1 - 1);
+    // arguments
+    pos = json.find("\"arguments\"");
+    if (pos != std::string::npos) {
+        size_t openBracket = json.find("[", pos);
+        size_t closeBracket = json.find("]", openBracket);
+        std::string argsStr = json.substr(openBracket + 1, closeBracket - openBracket - 1);
+
+        std::stringstream ss(argsStr);
+        std::string arg;
+        while (std::getline(ss, arg, ',')) {
+            task.arguments.push_back(trim(arg));
+        }
     }
 
-    // Buscar el valor de "file"
-    auto file_pos = json.find("\"file\"");
-    if (file_pos != std::string::npos) {
-        auto colon = json.find(":", file_pos);
-        auto quote1 = json.find("\"", colon + 1);
-        auto quote2 = json.find("\"", quote1 + 1);
-        task.file = json.substr(quote1 + 1, quote2 - quote1 - 1);
+    // file
+    pos = json.find("\"file\"");
+    if (pos != std::string::npos) {
+        size_t colon = json.find(":", pos);
+        size_t end = json.find("}", colon);
+        task.file = trim(json.substr(colon + 1, end - colon - 1));
     }
 
     return task;

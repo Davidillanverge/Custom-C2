@@ -35,12 +35,12 @@ private:
 	AgentMetadata Metadata;
 	std::queue<Task> Tasks;
 	std::queue<TaskResult> Results;
-	std::unordered_map<std::string, std::string(*)(std::string arguments)> Commands;
+	std::unordered_map<std::string, std::string(*)(std::vector<std::string> arguments)> Commands;
 
 public:
 	Agent();
 
-	std::unordered_map<std::string, std::string(*)(std::string arguments)> loadCommands();
+	std::unordered_map<std::string, std::string(*)(std::vector<std::string> arguments)> loadCommands();
 
 	AgentMetadata generateMetadata();
 

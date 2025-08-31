@@ -3,7 +3,7 @@
 
 #include "Commands.h"
 
-std::string whoami(std::string arguments) {
+std::string whoami(std::vector<std::string> arguments) {
     char username[UNLEN + 1];
     DWORD size = UNLEN + 1;
 

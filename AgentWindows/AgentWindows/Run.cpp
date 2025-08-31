@@ -7,21 +7,20 @@
 
 #include "Commands.h"
 
-std::string shell(std::vector<std::string> arguments) {
+std::string run(std::vector<std::string> arguments) {
     std::string result;
 
-    std::string args; 
+    std::string args;
     for (int i = 0; i < arguments.size(); i++) {
         args += arguments[i];
         if (i < arguments.size() - 1) args += " ";
     }
-  
+
     STARTUPINFOA si = {};
     PROCESS_INFORMATION pi = {};
 
-    std::string cmdline = "C:\\Windows\\System32\\cmd.exe /c " + args;
     // Crear un buffer mutable con terminador nulo
-    std::vector<char> buffer(cmdline.begin(), cmdline.end());
+    std::vector<char> buffer(args.begin(), args.end());
     buffer.push_back('\0');
     char* cmd = buffer.data();
 

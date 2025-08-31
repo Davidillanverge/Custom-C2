@@ -19,18 +19,28 @@ struct TaskResult {
 struct Task {
     int id;
     std::string command;
-    std::string arguments;
+    std::vector<std::string> arguments;
     std::string file;
 
     std::string to_json()const {
-        std::ostringstream oss;
-        oss << "{"
-            << "\"id\":" << id << ","
-            << "\"command\":\"" << command << "\","
-            << "\"arguments\":\"" << arguments << "\","
-            << "\"file\":\"" << file << "\""
-            << "}";
-        return oss.str();
+        std::string json = "{";
+
+    json += "\"id\": " + std::to_string(id) + ", ";
+    json += "\"command\": \"" + command + "\", ";
+
+    // Serializar vector de argumentos como array JSON
+    json += "\"arguments\": [";
+    for (size_t i = 0; i < arguments.size(); i++) {
+        json += "\"" + arguments[i] + "\"";
+        if (i < arguments.size() - 1) json += ", ";
+    }
+    json += "], ";
+
+    json += "\"file\": \"" + file + "\"";
+
+    json += "}";
+
+    return json;
     }
 };
 
