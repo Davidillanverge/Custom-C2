@@ -102,3 +102,71 @@ desktop.ini
 doc/_build/
 docs/_build/
 
+#==========================
+# Visual Studio
+#==========================
+# Visual Studio
+.vs/
+*.vcxproj.user
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# Visual Studio Code settings
+.vscode/
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Other temporary files
+*.ncb
+*.aps
+*.pch
+*.idb
+*.pdb
+*.ipch
+*.tlog/
+*.lastbuildstate
+*.res
+*.opensdf
+*.sdf
+
+# Libraries and packages
+*.lib
+*.dll
+*.exp
+*.manifest
+*.obj
+
+# Others
+*.log
+*.tmp
+*.temp
+*.cache
+
+# Ignore generated executables
+*.exe
+*.out
+*.app
+
+
+
