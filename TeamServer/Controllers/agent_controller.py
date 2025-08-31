@@ -183,9 +183,9 @@ def add_task(agent_id):
               required: true
               example: "whoami"
             arguments:
-              type: string
+              type: array
               required: true
-              example: "/all" 
+              example: ["/all"]
             file:
               type: string
               required: true

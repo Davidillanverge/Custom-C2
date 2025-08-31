@@ -20,7 +20,7 @@ class Task:
     def get_arguments(self):
         return self.arguments
 
-    def set_arguments(self, value):
+    def set_arguments(self, value: List[str]):
         self.arguments = value
 
     def get_file(self):

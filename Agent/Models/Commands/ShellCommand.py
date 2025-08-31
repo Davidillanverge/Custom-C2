@@ -8,5 +8,5 @@ class ShellCommand(Command):
         self.name = "shell"
 
     def execute(self, task: Task) -> str:
-        command = task.get_arguments().strip().split()
+        command = task.get_arguments()
         return subprocess.getoutput(" ".join(command))
