@@ -1,6 +1,9 @@
 #pragma once
+#include <Windows.h>
 #include <sstream>
 #include <vector>
+
+std::string json_escape(const std::string& s);
 
 struct TaskResult {
     int task_id;
@@ -10,7 +13,7 @@ struct TaskResult {
         std::ostringstream oss;
         oss << "{"
             << "\"task_id\":" << task_id << ","
-            << "\"result\":\"" << result << "\""
+            << "\"result\":\"" << json_escape(result) << "\""
             << "}";
         return oss.str();
     }
@@ -44,8 +47,9 @@ struct Task {
     }
 };
 
-std::wstring s2ws(const std::string& str);
-std::string arrayTaskResult2json(const std::vector<TaskResult>& results);
 Task json2Task(const std::string& json);
 std::vector<Task> json2arrayTasks(const std::string& json);
+std::wstring s2ws(const std::string& str);
+std::string arrayTaskResult2json(const std::vector<TaskResult>& results);
 std::string base64_encode(const std::string& input);
+std::string readPipe(HANDLE hRead);

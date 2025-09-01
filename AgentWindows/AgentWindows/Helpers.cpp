@@ -112,3 +112,31 @@ std::string base64_encode(const std::string& input) {
     while (encoded.size() % 4) encoded.push_back('=');
     return encoded;
 }
+std::string json_escape(const std::string& s) {
+    std::string out;
+    for (char c : s) {
+        switch (c) {
+        case '\"': out += "\\\""; break;
+        case '\\': out += "\\\\"; break;
+        case '\r': break; // opcional: ignorar \r
+        case '\n': out += "\\n"; break;
+        default: out += c;
+        }
+    }
+    return out;
+}
+
+std::string readPipe(HANDLE hRead) {
+    std::string result;
+    char buffer[4096];
+    DWORD bytesRead;
+    while (true) {
+        BOOL success = ReadFile(hRead, buffer, sizeof(buffer) - 1, &bytesRead, NULL);
+        if (!success || bytesRead == 0) break;
+
+        buffer[bytesRead] = '\0';
+        result += buffer;
+    }
+
+    return result;
+}
