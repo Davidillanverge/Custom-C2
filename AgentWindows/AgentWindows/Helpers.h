@@ -53,3 +53,7 @@ std::wstring s2ws(const std::string& str);
 std::string arrayTaskResult2json(const std::vector<TaskResult>& results);
 std::string base64_encode(const std::string& input);
 std::string readPipe(HANDLE hRead);
+std::string GetHostname();
+std::string GetProcessname();
+std::string GetArch();
+std::string GetProcessIntegrityLevel();

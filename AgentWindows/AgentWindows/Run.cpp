@@ -53,7 +53,7 @@ std::string run(std::vector<std::string> arguments) {
 
     char* cmd = create_commandline(arguments);
     if (!CreateProcessA(NULL, cmd, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-        return "Error al ejecutar el comando";
+        return "Command execution failed.";
     }
 
     CloseHandle(hWrite);

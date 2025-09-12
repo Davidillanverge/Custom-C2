@@ -2,6 +2,7 @@
 #include "Helpers.h"
 #include <vector>
 #include <string>
+#include <sddl.h>
 
 std::wstring s2ws(const std::string& str) {
     return std::wstring(str.begin(), str.end());
@@ -139,4 +140,97 @@ std::string readPipe(HANDLE hRead) {
     }
 
     return result;
+}
+
+std::string GetArch() {
+    SYSTEM_INFO si;
+    GetNativeSystemInfo(&si);
+
+    switch (si.wProcessorArchitecture) {
+    case PROCESSOR_ARCHITECTURE_AMD64:
+        return "x64 (AMD or Intel)";
+    case PROCESSOR_ARCHITECTURE_INTEL:
+        return "x86";
+    case PROCESSOR_ARCHITECTURE_ARM:
+        return "ARM";
+    case PROCESSOR_ARCHITECTURE_ARM64:
+        return "ARM64";
+    case PROCESSOR_ARCHITECTURE_IA64:
+        return "Intel Itanium-based";
+    case PROCESSOR_ARCHITECTURE_UNKNOWN:
+    default:
+        return "Unknown";
+    }
+}
+
+std::string GetHostname() {
+    char buffer[MAX_COMPUTERNAME_LENGTH + 1];
+    DWORD size = sizeof(buffer);
+    if (GetComputerNameA(buffer, &size)) {
+        return std::string(buffer);
+    }
+
+    return "unknown";
+}
+
+std::string GetProcessname() {
+    char buffer[MAX_PATH];
+    DWORD size = GetModuleFileNameA(NULL, buffer, MAX_PATH);
+    if (size == 0) {
+        return {};
+    }
+
+    std::string fullPath(buffer);
+
+    size_t pos = fullPath.find_last_of("\\/");
+    if (pos != std::string::npos) {
+        return fullPath.substr(pos + 1);
+    }
+    return fullPath;
+}
+
+
+std::string GetProcessIntegrityLevel() {
+    HANDLE hToken = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken)) {
+        return std::string("unknown");
+    }
+
+    DWORD length = 0;
+    GetTokenInformation(hToken, TokenIntegrityLevel, nullptr, 0, &length);
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+        CloseHandle(hToken);
+        return std::string("unknown");
+    }
+
+    PTOKEN_MANDATORY_LABEL pTIL = (PTOKEN_MANDATORY_LABEL)LocalAlloc(0, length);
+    if (!pTIL) {
+        CloseHandle(hToken);
+        return std::string("unknown");
+    }
+
+    if (!GetTokenInformation(hToken, TokenIntegrityLevel, pTIL, length, &length)) {
+        LocalFree(pTIL);
+        CloseHandle(hToken);
+        return std::string("unknown");
+    }
+
+    DWORD rid = *GetSidSubAuthority(pTIL->Label.Sid,
+        (DWORD)(*GetSidSubAuthorityCount(pTIL->Label.Sid) - 1));
+
+    std::string level;
+    switch (rid) {
+    case SECURITY_MANDATORY_UNTRUSTED_RID: level = "Untrusted"; break;
+    case SECURITY_MANDATORY_LOW_RID:       level = "Low"; break;
+    case SECURITY_MANDATORY_MEDIUM_RID:    level = "Medium"; break;
+    case SECURITY_MANDATORY_HIGH_RID:      level = "High"; break;
+    case SECURITY_MANDATORY_SYSTEM_RID:    level = "System"; break;
+    case SECURITY_MANDATORY_PROTECTED_PROCESS_RID: level = "Protected Process"; break;
+    default: level = "Unknown (" + std::to_string(rid) + ")"; break;
+    }
+
+    LocalFree(pTIL);
+    CloseHandle(hToken);
+
+    return level;
 }

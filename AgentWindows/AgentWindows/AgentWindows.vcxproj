@@ -181,6 +181,9 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Agent.cpp" />
+    <ClCompile Include="Cd.cpp" />
+    <ClCompile Include="Ls.cpp" />
+    <ClCompile Include="Pwd.cpp" />
     <ClCompile Include="Run.cpp" />
     <ClCompile Include="Shell.cpp" />
     <ClCompile Include="Whoami.cpp" />

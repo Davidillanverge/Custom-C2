@@ -1,4 +1,3 @@
-#include <Windows.h>
 #include <Lmcons.h>
 
 #include "Commands.h"

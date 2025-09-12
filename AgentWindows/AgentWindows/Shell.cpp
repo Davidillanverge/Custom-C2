@@ -57,7 +57,7 @@ std::string shell(std::vector<std::string> arguments) {
     if (!CreateProcessA(NULL, cmdline, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
         CloseHandle(hRead);
         CloseHandle(hWrite);
-        return "Error al ejecutar el comando";
+        return "Command execution failed.";
     }
 
     CloseHandle(hWrite);
