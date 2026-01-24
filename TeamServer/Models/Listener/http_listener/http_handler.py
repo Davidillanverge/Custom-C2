@@ -70,7 +70,8 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
                 # Responde with tasks
                 tasks = asyncio.run(agent.get_pendingTasks())
                 self._send_response({"tasks": [task.to_dict() for task in tasks]}, status=200)
-            except:
+            except Exception as e:
+                print(e)
                 self._send_response("Internal Error", 500)
 
 
@@ -92,7 +93,12 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
     def extractTaskResults(self, result_str: str):
         results_org = json.loads(result_str)
         results_toret : List[TaskResult] = []
-        for result in results_org['results']:
+    
+        results_decoded = base64.b64decode(results_org['results']).decode("utf-8", errors='replace')
+        results = json.loads(results_decoded)
+        print(results)
+        for result in results:
+            print(result)
             try:
                 result : TaskResult = TaskResult(**result)
             except:
