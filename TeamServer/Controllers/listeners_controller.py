@@ -117,8 +117,18 @@ def remove_listener():
           application/json: {"name":"Listener1", "port":8080}
     """
     data = request.get_json()
+    if not data or 'name' not in data:
+        return "Invalid request data", 400
+
     listener: Listener = listener_service.get_listener_by_name(data['name'])
-    listener.stop()
-    if listener_service.delete_listener(listener):
-      return f"Listener {data['name']} deleted", 201
-    else: return f"Can not delete listener {data['name']}", 409
+    if listener is None:
+        return f"Listener {data['name']} not found", 404
+
+    try:
+        listener.stop()
+        if listener_service.delete_listener(listener):
+            return f"Listener {data['name']} deleted", 200
+        else:
+            return f"Can not delete listener {data['name']}", 409
+    except Exception as e:
+        return f"Error stopping listener {data['name']}: {str(e)}", 500

@@ -1,10 +1,14 @@
 from flask import Flask
+from flask_cors import CORS
 from flasgger import Swagger
 from Controllers.listeners_controller import listeners_bp
 from Controllers.agent_controller import agent_bp
 
 def create_app():
     app = Flask(__name__)
+
+    # Enable CORS for all routes
+    CORS(app)
 
     # Configuración de Swagger
     app.config['SWAGGER'] = {
@@ -21,4 +25,4 @@ def create_app():
 
 if __name__ == "__main__":
     app = create_app()
-    app.run(debug=True)
+    app.run(debug=True, port=8000)
