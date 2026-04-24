@@ -38,8 +38,8 @@ class AgentMetadata:
     def set_pid(self, value):
         self.pid = value
 
-    def get_integryty(self):
-        return self.integryty
+    def get_integrity(self):
+        return self.integrity
 
     def set_integrity(self, value):
         self.integrity = value

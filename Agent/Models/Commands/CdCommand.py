@@ -9,6 +9,7 @@ class CdCommand(Command):
         self.name = "cd"
 
     def execute(self, task: Task) -> str:
-        arguments = task.get_arguments().strip().split()
-        os.chdir(arguments[0])
+        arguments = task.get_arguments()
+        path = arguments[0] if arguments else "."
+        os.chdir(path)
         return os.getcwd()

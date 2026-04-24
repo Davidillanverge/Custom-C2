@@ -1,5 +1,5 @@
-from asyncio import Queue
 import datetime
+from queue import Queue
 from typing import List
 from Models.Agent.agent_metadata import AgentMetadata
 from Models.Agent.task import Task
@@ -10,8 +10,8 @@ class Agent:
     def __init__(self, metadata: AgentMetadata):
         self.metadata = metadata
         self.lastseen = None
-        self.tasks : Queue[Task] = Queue()
-        self.results : List[TaskResult] = []
+        self.tasks: Queue = Queue()
+        self.results: List[TaskResult] = []
 
     def get_metadata(self) -> AgentMetadata:
         return self.metadata
@@ -35,28 +35,30 @@ class Agent:
         elif key == "processname":
             self.metadata.set_processname(value)
         elif key == "processid":
-            self.metadata.set_processid(value)
-        elif key == "integryty":
-            self.metadata.set_integryty(value)
+            self.metadata.set_pid(value)
+        elif key == "integrity":
+            self.metadata.set_integrity(value)
         elif key == "arch":
             self.metadata.set_arch(value)
 
     def check_in(self):
         self.set_lastseen(datetime.datetime.now())
 
+    def check_out(self):
+        self.set_lastseen(None)
+
     def get_tasks(self) -> List[Task]:
-        return list(self.tasks._queue)
+        return list(self.tasks.queue)
 
     def add_task(self, task: Task):
         self.tasks.put_nowait(task)
 
-    async def get_pendingTasks(self) -> List[Task]:
+    def get_pending_tasks(self) -> List[Task]:
         tasks: List[Task] = []
         while not self.tasks.empty():
-            task = await self.tasks.get()
-            tasks.append(task)
+            tasks.append(self.tasks.get_nowait())
         return tasks
-    
+
     def add_results(self, results: List[TaskResult]):
         for result in results:
             self.results.append(result)

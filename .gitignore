@@ -1,4 +1,21 @@
 # =========================
+# Archivos de Claude
+# =========================
+c2-frontend/CLAUDE.md
+
+# =========================
+# Configuración local / secretos
+# =========================
+config.json
+config.local.json
+*.config.local.py
+teamserver.config
+agent.config
+.env.local
+.env.production
+.env.development
+
+# =========================
 # Archivos de Python
 # =========================
 __pycache__/

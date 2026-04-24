@@ -1,11 +1,9 @@
-from abc import ABC, abstractmethod
+from abc import ABC
 
-from Services.agent_service import AgentService
 
 class Listener(ABC):
     def __init__(self, name):
         self.name = name
-        self.agent_service = AgentService()
 
     def start(self):
         pass

@@ -3,6 +3,7 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <random>
 #include <unordered_map>
 
 Agent::Agent(){
@@ -23,13 +24,20 @@ std::unordered_map<std::string, std::string(*)(std::vector<std::string> argument
 	return commands;
 }
 AgentMetadata Agent::generateMetadata() {
+	std::mt19937 rng(
+		static_cast<unsigned int>(
+			std::chrono::steady_clock::now().time_since_epoch().count()
+		) ^ GetCurrentProcessId()
+	);
+	std::uniform_int_distribution<int> dist(1000, 9999);
+
 	std::vector<std::string> arguments;
 	AgentMetadata metadata = {
-		1,
+		dist(rng),
 		GetHostname(),
 		Commands["whoami"](arguments),
 		GetProcessname(),
-		GetCurrentProcessId(),
+		static_cast<int>(GetCurrentProcessId()),
 		GetProcessIntegrityLevel(),
 		GetArch()
 	};

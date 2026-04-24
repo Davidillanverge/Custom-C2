@@ -8,6 +8,6 @@ class LsCommand(Command):
         self.name = "ls"
 
     def execute(self, task: Task) -> str:
-        arguments = task.get_arguments().strip().split()
+        arguments = task.get_arguments()
         path = arguments[0] if arguments else "."
         return "\n".join(os.listdir(path))

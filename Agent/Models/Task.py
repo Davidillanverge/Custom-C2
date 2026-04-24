@@ -2,7 +2,7 @@ from typing import List
 
 
 class Task:
-    def __init__(self, id, command, arguments: str, file: bytes = None):
+    def __init__(self, id, command, arguments: List[str], file: bytes = None):
         self.id = id
         self.command = command
         self.arguments = arguments
