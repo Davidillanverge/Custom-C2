@@ -30,6 +30,26 @@ export interface Listener {
   port: number;
 }
 
+export type BuildArch   = 'x64' | 'x86' | 'ARM64';
+export type BuildStatus = 'pending' | 'running' | 'success' | 'failed';
+
+export interface BuildRequest {
+  host: string;
+  port: number;
+  arch: BuildArch;
+}
+
+export interface Build {
+  id:          string;
+  host:        string;
+  port:        number;
+  arch:        BuildArch;
+  status:      BuildStatus;
+  created_at:  string;
+  finished_at: string | null;
+  error_log:   string;
+}
+
 const api = axios.create({
   baseURL: 'http://localhost:8000',
   timeout: 10000,
@@ -66,6 +86,23 @@ export const listenerAPI = {
     api.post('/listeners/create', listener),
 
   removeListener: (name: string) => api.delete('/listeners/remove', { data: { name } }),
+};
+
+export const builderAPI = {
+  getBuilds: () =>
+    api.get('/builder/').then(r => r.data as Build[]),
+
+  createBuild: (req: BuildRequest) =>
+    api.post('/builder/', req).then(r => r.data as Build),
+
+  getBuild: (id: string) =>
+    api.get(`/builder/${id}`).then(r => r.data as Build),
+
+  deleteBuild: (id: string) =>
+    api.delete(`/builder/${id}`),
+
+  downloadUrl: (id: string): string =>
+    `http://localhost:8000/builder/${id}/download`,
 };
 
 export default api;

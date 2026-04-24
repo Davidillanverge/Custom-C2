@@ -1,12 +1,13 @@
 import React from 'react';
 import { Box, Typography, List, ListItemButton, ListItemIcon, ListItemText } from '@mui/material';
 import { Link, useLocation } from 'react-router-dom';
-import { Dashboard, Computer, Router } from '@mui/icons-material';
+import { Dashboard, Computer, Router, Construction } from '@mui/icons-material';
 
 const navItems = [
-  { path: '/', label: 'Dashboard', icon: <Dashboard sx={{ fontSize: 15 }} /> },
-  { path: '/agents', label: 'Agents', icon: <Computer sx={{ fontSize: 15 }} /> },
-  { path: '/listeners', label: 'Listeners', icon: <Router sx={{ fontSize: 15 }} /> },
+  { path: '/',         label: 'Dashboard', icon: <Dashboard    sx={{ fontSize: 15 }} /> },
+  { path: '/agents',   label: 'Agents',    icon: <Computer     sx={{ fontSize: 15 }} /> },
+  { path: '/listeners',label: 'Listeners', icon: <Router       sx={{ fontSize: 15 }} /> },
+  { path: '/builder',  label: 'Builder',   icon: <Construction sx={{ fontSize: 15 }} /> },
 ];
 
 const Sidebar: React.FC = () => {

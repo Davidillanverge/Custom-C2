@@ -10,6 +10,7 @@ import Dashboard from './components/Dashboard';
 import Agents from './components/Agents';
 import AgentDetail from './components/AgentDetail';
 import Listeners from './components/Listeners';
+import Builder from './components/Builder';
 
 function App() {
   return (
@@ -28,6 +29,7 @@ function App() {
                 <Route path="/agents" element={<Agents />} />
                 <Route path="/agent/:id" element={<AgentDetail />} />
                 <Route path="/listeners" element={<Listeners />} />
+                <Route path="/builder"   element={<Builder />} />
               </Routes>
             </Box>
           </Box>
