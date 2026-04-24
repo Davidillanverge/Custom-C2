@@ -1,329 +1,409 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import {
-  Box,
-  Typography,
-  Card,
-  CardContent,
-  Grid,
-  Chip,
-  Button,
-  TextField,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Alert,
-  Snackbar,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper,
-  Breadcrumbs,
-} from '@mui/material';
-import { ArrowBack, Send, Computer } from '@mui/icons-material';
+import { Box, Typography, TextField, IconButton, Tooltip, Alert, Chip } from '@mui/material';
+import { ArrowBack, Send, Refresh } from '@mui/icons-material';
 import { agentAPI, Agent, Task, TaskResult } from '../services/api';
+
+interface ConsoleEntry {
+  key: number;
+  type: 'command' | 'output' | 'info' | 'error';
+  content: string;
+  timestamp: Date;
+}
+
+const PREDEFINED_CMDS = [
+  'whoami', 'id', 'pwd', 'ls', 'hostname', 'ps', 'uname -a',
+  'ifconfig', 'netstat', 'cat /etc/passwd',
+];
 
 const AgentDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const agentId = parseInt(id!);
 
   const [agent, setAgent] = useState<Agent | null>(null);
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [results, setResults] = useState<TaskResult[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string>('');
-  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
-    open: false,
-    message: '',
-    severity: 'success',
-  });
-
-  // Task form state
+  const [entries, setEntries] = useState<ConsoleEntry[]>([]);
   const [command, setCommand] = useState('');
   const [args, setArgs] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+
+  const consoleEndRef = useRef<HTMLDivElement>(null);
+  const seenResultIds = useRef<Set<number>>(new Set());
+  const entryKey = useRef(0);
+
+  const nextKey = () => ++entryKey.current;
+
+  const appendEntry = useCallback((type: ConsoleEntry['type'], content: string) => {
+    setEntries((prev) => [
+      ...prev,
+      { key: nextKey(), type, content, timestamp: new Date() },
+    ]);
+  }, []);
 
   useEffect(() => {
-    loadAgentData();
-  }, [agentId]);
+    consoleEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [entries]);
 
-  const loadAgentData = async () => {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const [agentData, tasksData, resultsData] = await Promise.all([
+      const [agentData, tasksData, resultsData]: [Agent, Task[], TaskResult[]] = await Promise.all([
         agentAPI.getAgent(agentId),
         agentAPI.getTasks(agentId),
         agentAPI.getResults(agentId),
       ]);
+
       setAgent(agentData);
-      setTasks(tasksData);
-      setResults(resultsData);
-      setError('');
-    } catch (err) {
-      setError('Failed to load agent data');
-      console.error(err);
+
+      const resultMap = new Map<number, string>(
+        resultsData.map((r) => [r.task_id, r.result])
+      );
+      seenResultIds.current = new Set(resultsData.map((r) => r.task_id));
+
+      const initial: ConsoleEntry[] = [
+        {
+          key: nextKey(),
+          type: 'info',
+          content: `Session opened — ${agentData.hostname} / ${agentData.username} / ${agentData.arch} / ${agentData.integrity}`,
+          timestamp: new Date(),
+        },
+      ];
+
+      for (const task of tasksData) {
+        initial.push({
+          key: nextKey(),
+          type: 'command',
+          content: [task.command, ...task.arguments].join(' '),
+          timestamp: new Date(),
+        });
+        const result = resultMap.get(task.id);
+        if (result !== undefined) {
+          initial.push({
+            key: nextKey(),
+            type: 'output',
+            content: result,
+            timestamp: new Date(),
+          });
+        }
+      }
+
+      setEntries(initial);
+      setLoadError('');
+    } catch {
+      setLoadError('Failed to load agent data');
     } finally {
       setLoading(false);
     }
-  };
+  }, [agentId]);
 
-  const handleSendTask = async () => {
-    if (!command.trim()) return;
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const resultsData: TaskResult[] = await agentAPI.getResults(agentId);
+        const newEntries: ConsoleEntry[] = [];
+        for (const r of resultsData) {
+          if (!seenResultIds.current.has(r.task_id)) {
+            seenResultIds.current.add(r.task_id);
+            newEntries.push({
+              key: nextKey(),
+              type: 'output',
+              content: r.result,
+              timestamp: new Date(),
+            });
+          }
+        }
+        if (newEntries.length > 0) {
+          setEntries((prev) => [...prev, ...newEntries]);
+        }
+      } catch {}
+    };
+
+    const interval = setInterval(poll, 5000);
+    return () => clearInterval(interval);
+  }, [agentId]);
+
+  const handleSend = async () => {
+    const cmd = command.trim();
+    if (!cmd) return;
+
+    const fullCmd = args.trim() ? `${cmd} ${args.trim()}` : cmd;
+    appendEntry('command', fullCmd);
+    setCommand('');
+    setArgs('');
 
     try {
-      const taskData = {
-        command: command.trim(),
-        arguments: args.trim() ? args.split(' ') : [],
+      await agentAPI.sendTask(agentId, {
+        command: cmd,
+        arguments: args.trim() ? args.trim().split(/\s+/) : [],
         file: '',
-      };
-
-      await agentAPI.sendTask(agentId, taskData);
-      setSnackbar({ open: true, message: 'Task sent successfully', severity: 'success' });
-      setCommand('');
-      setArgs('');
-
-      // Reload data to show new task
-      setTimeout(() => loadAgentData(), 1000);
-    } catch (err) {
-      setSnackbar({ open: true, message: 'Failed to send task', severity: 'error' });
+      });
+    } catch {
+      appendEntry('error', 'Failed to send task to agent');
     }
   };
 
-  const predefinedCommands = [
-    'whoami',
-    'pwd',
-    'ls',
-    'ps',
-    'hostname',
-    'id',
-    'uname -a',
-    'ifconfig',
-    'netstat',
-    'cat /etc/passwd',
-    'cat /etc/shadow',
-  ];
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') handleSend();
+  };
 
   if (loading) {
-    return <Typography>Loading agent details...</Typography>;
-  }
-
-  if (error || !agent) {
     return (
-      <Box>
-        <Alert severity="error" sx={{ mb: 2 }}>
-          {error || 'Agent not found'}
-        </Alert>
-        <Button component={Link} to="/agents" startIcon={<ArrowBack />}>
-          Back to Agents
-        </Button>
+      <Box sx={{ p: 2, color: '#858585', fontFamily: 'monospace', fontSize: 12 }}>
+        Connecting to agent {agentId}...
       </Box>
     );
   }
 
+  if (loadError || !agent) {
+    return (
+      <Box sx={{ p: 2 }}>
+        <Alert severity="error">{loadError || 'Agent not found'}</Alert>
+      </Box>
+    );
+  }
+
+  const isOnline =
+    !!agent.lastseen &&
+    new Date(agent.lastseen) > new Date(Date.now() - 5 * 60 * 1000);
+
   return (
-    <Box>
-      <Breadcrumbs sx={{ mb: 2 }}>
-        <Link to="/" style={{ textDecoration: 'none', color: 'inherit' }}>
-          Dashboard
-        </Link>
-        <Link to="/agents" style={{ textDecoration: 'none', color: 'inherit' }}>
-          Agents
-        </Link>
-        <Typography color="textPrimary">Agent {agent.id}</Typography>
-      </Breadcrumbs>
-
-      <Typography variant="h4" gutterBottom>
-        <Computer sx={{ mr: 1, verticalAlign: 'middle' }} />
-        Agent {agent.id} Details
-      </Typography>
-
-      {/* Agent Info */}
-      <Card sx={{ mb: 3 }}>
-        <CardContent>
-          <Grid container spacing={3}>
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-              <Typography variant="subtitle2" color="textSecondary">Hostname</Typography>
-              <Typography variant="h6">{agent.hostname}</Typography>
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-              <Typography variant="subtitle2" color="textSecondary">Username</Typography>
-              <Typography variant="h6">{agent.username}</Typography>
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-              <Typography variant="subtitle2" color="textSecondary">Process</Typography>
-              <Typography variant="h6">{agent.processname}</Typography>
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-              <Typography variant="subtitle2" color="textSecondary">PID</Typography>
-              <Typography variant="h6">{agent.pid}</Typography>
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-              <Typography variant="subtitle2" color="textSecondary">Integrity</Typography>
-              <Chip
-                label={agent.integrity}
-                color={agent.integrity === 'High' ? 'success' : 'warning'}
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-              <Typography variant="subtitle2" color="textSecondary">Architecture</Typography>
-              <Typography variant="h6">{agent.arch}</Typography>
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-              <Typography variant="subtitle2" color="textSecondary">Last Seen</Typography>
-              <Typography variant="h6">
-                {agent.lastseen ? new Date(agent.lastseen).toLocaleString() : 'Never'}
-              </Typography>
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-              <Typography variant="subtitle2" color="textSecondary">Status</Typography>
-              <Chip
-                label={agent.lastseen ? 'Online' : 'Offline'}
-                color={agent.lastseen ? 'success' : 'default'}
-              />
-            </Grid>
-          </Grid>
-        </CardContent>
-      </Card>
-
-      {/* Send Task */}
-      <Card sx={{ mb: 3 }}>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            Send Task
-          </Typography>
-          <Grid container spacing={2} alignItems="center">
-            <Grid size={{ xs: 12, sm: 4 }}>
-              <TextField
-                fullWidth
-                label="Command"
-                value={command}
-                onChange={(e) => setCommand(e.target.value)}
-                placeholder="Enter command (e.g., whoami, ls, pwd)"
-                helperText="Type any command or select from suggestions"
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField
-                fullWidth
-                label="Arguments (optional)"
-                value={args}
-                onChange={(e) => setArgs(e.target.value)}
-                placeholder="Command arguments separated by spaces"
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 2 }}>
-              <Button
-                fullWidth
-                variant="contained"
-                color="primary"
-                startIcon={<Send />}
-                onClick={handleSendTask}
-                disabled={!command.trim()}
-              >
-                Send Task
-              </Button>
-            </Grid>
-          </Grid>
-        </CardContent>
-      </Card>
-
-      {/* Tasks and Results */}
-      <Grid container spacing={3}>
-        <Grid size={{ xs: 12, md: 6 }}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Pending Tasks
-              </Typography>
-              <TableContainer component={Paper} sx={{ backgroundColor: 'background.paper' }}>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>ID</TableCell>
-                      <TableCell>Command</TableCell>
-                      <TableCell>Arguments</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {tasks.map((task) => (
-                      <TableRow key={task.id}>
-                        <TableCell>{task.id}</TableCell>
-                        <TableCell>{task.command}</TableCell>
-                        <TableCell>{task.arguments.join(' ')}</TableCell>
-                      </TableRow>
-                    ))}
-                    {tasks.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={3} align="center">
-                          No pending tasks
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        <Grid size={{ xs: 12, md: 6 }}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Task Results
-              </Typography>
-              <TableContainer component={Paper} sx={{ backgroundColor: 'background.paper' }}>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Task ID</TableCell>
-                      <TableCell>Result</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {results.map((result) => (
-                      <TableRow key={result.task_id}>
-                        <TableCell>{result.task_id}</TableCell>
-                        <TableCell>
-                          <Box sx={{ maxHeight: 100, overflow: 'auto' }}>
-                            <pre style={{ margin: 0, fontSize: '0.75rem', whiteSpace: 'pre-wrap' }}>
-                              {result.result}
-                            </pre>
-                          </Box>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {results.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={2} align="center">
-                          No task results yet
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-
-      <Snackbar
-        open={snackbar.open}
-        autoHideDuration={4000}
-        onClose={() => setSnackbar({ ...snackbar, open: false })}
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* Agent info bar */}
+      <Box
+        sx={{
+          px: 1.5,
+          py: 0.75,
+          backgroundColor: '#2d2d2d',
+          borderBottom: '1px solid #3c3c3c',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1.5,
+          flexWrap: 'wrap',
+          flexShrink: 0,
+        }}
       >
-        <Alert
-          onClose={() => setSnackbar({ ...snackbar, open: false })}
-          severity={snackbar.severity}
-          sx={{ width: '100%' }}
-        >
-          {snackbar.message}
-        </Alert>
-      </Snackbar>
+        <Tooltip title="Back to Agents">
+          <IconButton component={Link} to="/agents" size="small" sx={{ p: 0.25, color: '#858585' }}>
+            <ArrowBack sx={{ fontSize: 14 }} />
+          </IconButton>
+        </Tooltip>
+
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+          <Box
+            sx={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              backgroundColor: isOnline ? '#4caf50' : '#555',
+            }}
+          />
+          <Typography sx={{ fontSize: '12px', color: '#4e9af1', fontWeight: 700 }}>
+            {agent.hostname}/{agent.username}
+          </Typography>
+        </Box>
+
+        {[
+          { label: 'PID', value: String(agent.pid) },
+          { label: 'Process', value: agent.processname },
+          { label: 'Arch', value: agent.arch },
+          { label: 'Integrity', value: agent.integrity },
+          {
+            label: 'Last Seen',
+            value: agent.lastseen ? new Date(agent.lastseen).toLocaleString() : 'Never',
+          },
+        ].map(({ label, value }) => (
+          <Box key={label} sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
+            <Typography sx={{ fontSize: '11px', color: '#555' }}>{label}:</Typography>
+            <Typography sx={{ fontSize: '11px', color: '#cccccc' }}>{value}</Typography>
+          </Box>
+        ))}
+
+        <Box sx={{ flex: 1 }} />
+        <Tooltip title="Refresh">
+          <IconButton size="small" onClick={loadData} sx={{ p: 0.25 }}>
+            <Refresh sx={{ fontSize: 14, color: '#858585' }} />
+          </IconButton>
+        </Tooltip>
+      </Box>
+
+      {/* Console output */}
+      <Box
+        sx={{
+          flex: 1,
+          overflow: 'auto',
+          backgroundColor: '#0c0c0c',
+          p: 1.5,
+          fontFamily: '"Consolas", "Courier New", monospace',
+          fontSize: '12px',
+        }}
+      >
+        {entries.map((entry) => {
+          if (entry.type === 'command') {
+            return (
+              <Box key={entry.key} sx={{ mb: 0.75 }}>
+                <Box component="span" sx={{ color: '#555', fontSize: '11px' }}>
+                  [{entry.timestamp.toLocaleTimeString()}]{' '}
+                </Box>
+                <Box component="span" sx={{ color: '#4e9af1' }}>
+                  {agent.username}@{agent.hostname}
+                </Box>
+                <Box component="span" sx={{ color: '#858585' }}> $ </Box>
+                <Box component="span" sx={{ color: '#ffffff' }}>{entry.content}</Box>
+              </Box>
+            );
+          }
+
+          if (entry.type === 'output') {
+            return (
+              <Box
+                key={entry.key}
+                sx={{
+                  pl: 2,
+                  mb: 1,
+                  borderLeft: '2px solid #2d2d2d',
+                }}
+              >
+                <pre
+                  style={{
+                    margin: 0,
+                    color: '#4caf50',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    fontSize: '12px',
+                    fontFamily: '"Consolas", "Courier New", monospace',
+                  }}
+                >
+                  {entry.content}
+                </pre>
+              </Box>
+            );
+          }
+
+          if (entry.type === 'error') {
+            return (
+              <Typography key={entry.key} sx={{ color: '#f44747', fontSize: '11px', mb: 0.5 }}>
+                [!] {entry.content}
+              </Typography>
+            );
+          }
+
+          // info
+          return (
+            <Typography key={entry.key} sx={{ color: '#ddb100', fontSize: '11px', mb: 0.5 }}>
+              [*] {entry.content}
+            </Typography>
+          );
+        })}
+        <div ref={consoleEndRef} />
+      </Box>
+
+      {/* Quick commands */}
+      <Box
+        sx={{
+          px: 1,
+          py: 0.5,
+          backgroundColor: '#1a1a1a',
+          borderTop: '1px solid #3c3c3c',
+          display: 'flex',
+          gap: 0.5,
+          flexWrap: 'wrap',
+          flexShrink: 0,
+        }}
+      >
+        {PREDEFINED_CMDS.map((cmd) => (
+          <Chip
+            key={cmd}
+            label={cmd}
+            size="small"
+            onClick={() => setCommand(cmd)}
+            sx={{
+              height: '16px',
+              fontSize: '10px',
+              backgroundColor: '#2d2d2d',
+              color: '#9cdcfe',
+              borderRadius: '2px',
+              cursor: 'pointer',
+              '&:hover': { backgroundColor: '#3c3c3c' },
+            }}
+          />
+        ))}
+      </Box>
+
+      {/* Command input */}
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          px: 1,
+          py: 0.75,
+          backgroundColor: '#1a1a1a',
+          borderTop: '1px solid #3c3c3c',
+          gap: 1,
+          flexShrink: 0,
+        }}
+      >
+        <Typography sx={{ color: '#4e9af1', fontSize: '12px', whiteSpace: 'nowrap', userSelect: 'none' }}>
+          {agent.hostname} $
+        </Typography>
+        <TextField
+          value={command}
+          onChange={(e) => setCommand(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="command"
+          variant="outlined"
+          size="small"
+          sx={{
+            width: 180,
+            '& .MuiOutlinedInput-root': {
+              backgroundColor: '#0c0c0c',
+              '& fieldset': { borderColor: '#3c3c3c' },
+              '&:hover fieldset': { borderColor: '#555' },
+              '&.Mui-focused fieldset': { borderColor: '#4e9af1' },
+            },
+            '& input': { color: '#ffffff', padding: '3px 8px', fontSize: '12px' },
+          }}
+        />
+        <TextField
+          value={args}
+          onChange={(e) => setArgs(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="arguments"
+          variant="outlined"
+          size="small"
+          sx={{
+            flex: 1,
+            '& .MuiOutlinedInput-root': {
+              backgroundColor: '#0c0c0c',
+              '& fieldset': { borderColor: '#3c3c3c' },
+              '&:hover fieldset': { borderColor: '#555' },
+              '&.Mui-focused fieldset': { borderColor: '#4e9af1' },
+            },
+            '& input': { color: '#ffffff', padding: '3px 8px', fontSize: '12px' },
+          }}
+        />
+        <Tooltip title="Send (Enter)">
+          <span>
+            <IconButton
+              onClick={handleSend}
+              disabled={!command.trim()}
+              size="small"
+              sx={{
+                backgroundColor: command.trim() ? '#4e9af1' : '#2d2d2d',
+                color: command.trim() ? '#ffffff' : '#555',
+                borderRadius: '2px',
+                p: 0.5,
+                '&:hover': { backgroundColor: '#5ba8ff' },
+              }}
+            >
+              <Send sx={{ fontSize: 14 }} />
+            </IconButton>
+          </span>
+        </Tooltip>
+      </Box>
     </Box>
   );
 };

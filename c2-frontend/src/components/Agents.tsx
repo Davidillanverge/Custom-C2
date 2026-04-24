@@ -8,30 +8,39 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  Paper,
-  Button,
-  Chip,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
+  IconButton,
+  Tooltip,
   Alert,
   Snackbar,
 } from '@mui/material';
-import { Link } from 'react-router-dom';
-import { Computer, PlayArrow, Delete, Visibility } from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
+import { Visibility, PlayArrow, Delete, Refresh } from '@mui/icons-material';
 import { agentAPI, Agent } from '../services/api';
+
+const StatusDot: React.FC<{ lastseen?: string }> = ({ lastseen }) => {
+  const color = !lastseen
+    ? '#555'
+    : new Date(lastseen) > new Date(Date.now() - 5 * 60 * 1000)
+    ? '#4caf50'
+    : '#ddb100';
+  return (
+    <Box
+      component="span"
+      sx={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', backgroundColor: color }}
+    />
+  );
+};
 
 const Agents: React.FC = () => {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string>('');
-  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
-    open: false,
-    message: '',
-    severity: 'success',
-  });
+  const [error, setError] = useState('');
+  const [snackbar, setSnackbar] = useState<{
+    open: boolean;
+    message: string;
+    severity: 'success' | 'error';
+  }>({ open: false, message: '', severity: 'success' });
+  const navigate = useNavigate();
 
   useEffect(() => {
     loadAgents();
@@ -40,148 +49,154 @@ const Agents: React.FC = () => {
   const loadAgents = async () => {
     try {
       setLoading(true);
-      const data = await agentAPI.getAgents();
-      setAgents(data);
+      setAgents(await agentAPI.getAgents());
       setError('');
-    } catch (err) {
+    } catch {
       setError('Failed to load agents');
-      console.error(err);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCheckIn = async (agentId: number) => {
+  const handleCheckIn = async (e: React.MouseEvent, agentId: number) => {
+    e.stopPropagation();
     try {
       await agentAPI.checkInAgent(agentId);
-      setSnackbar({ open: true, message: 'Agent checked in successfully', severity: 'success' });
+      setSnackbar({ open: true, message: 'Check-in sent', severity: 'success' });
       loadAgents();
-    } catch (err) {
-      setSnackbar({ open: true, message: 'Failed to check in agent', severity: 'error' });
+    } catch {
+      setSnackbar({ open: true, message: 'Failed to check in', severity: 'error' });
     }
   };
 
-  const handleDelete = async (agentId: number) => {
-    console.log('Attempting to delete agent:', agentId);
-
+  const handleDelete = async (e: React.MouseEvent, agentId: number) => {
+    e.stopPropagation();
     try {
-      const response = await agentAPI.deleteAgent(agentId);
-      console.log('Delete agent response:', response);
-      setSnackbar({ open: true, message: 'Agent deleted successfully', severity: 'success' });
+      await agentAPI.deleteAgent(agentId);
+      setSnackbar({ open: true, message: 'Agent removed', severity: 'success' });
       loadAgents();
-    } catch (err) {
-      console.error('Failed to delete agent:', err);
-      setSnackbar({ open: true, message: 'Failed to delete agent', severity: 'error' });
+    } catch {
+      setSnackbar({ open: true, message: 'Failed to remove agent', severity: 'error' });
     }
-  };
-
-  const getStatusColor = (lastSeen?: string) => {
-    if (!lastSeen) return 'default';
-    const lastSeenDate = new Date(lastSeen);
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-    return lastSeenDate > fiveMinutesAgo ? 'success' : 'warning';
-  };
-
-  const getStatusText = (lastSeen?: string) => {
-    if (!lastSeen) return 'Offline';
-    const lastSeenDate = new Date(lastSeen);
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-    return lastSeenDate > fiveMinutesAgo ? 'Online' : 'Away';
   };
 
   return (
-    <Box>
-      <Typography variant="h4" gutterBottom>
-        <Computer sx={{ mr: 1, verticalAlign: 'middle' }} />
-        Agent Management
-      </Typography>
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* Toolbar */}
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          px: 1,
+          py: 0.5,
+          backgroundColor: '#2d2d2d',
+          borderBottom: '1px solid #3c3c3c',
+          flexShrink: 0,
+        }}
+      >
+        <Typography
+          sx={{
+            fontSize: '11px',
+            fontWeight: 700,
+            color: '#9cdcfe',
+            flex: 1,
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+          }}
+        >
+          Agents ({agents.length})
+        </Typography>
+        <Tooltip title="Refresh">
+          <IconButton size="small" onClick={loadAgents} sx={{ p: 0.25 }}>
+            <Refresh sx={{ fontSize: 14, color: '#858585' }} />
+          </IconButton>
+        </Tooltip>
+      </Box>
 
-      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+      {error && <Alert severity="error">{error}</Alert>}
 
-      <TableContainer component={Paper} sx={{ mt: 2 }}>
-        <Table>
+      <TableContainer sx={{ flex: 1, overflow: 'auto' }}>
+        <Table size="small" stickyHeader>
           <TableHead>
             <TableRow>
+              <TableCell sx={{ width: 20 }} />
               <TableCell>ID</TableCell>
               <TableCell>Hostname</TableCell>
-              <TableCell>Username</TableCell>
+              <TableCell>User</TableCell>
               <TableCell>Process</TableCell>
               <TableCell>PID</TableCell>
+              <TableCell>Arch</TableCell>
               <TableCell>Integrity</TableCell>
-              <TableCell>Architecture</TableCell>
               <TableCell>Last Seen</TableCell>
-              <TableCell>Status</TableCell>
               <TableCell>Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={10} align="center">
-                  Loading agents...
+                <TableCell colSpan={10} sx={{ textAlign: 'center', color: '#555', cursor: 'default' }}>
+                  Loading...
                 </TableCell>
               </TableRow>
             ) : agents.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} align="center">
-                  No agents connected yet
+                <TableCell colSpan={10} sx={{ textAlign: 'center', color: '#555', py: 4, cursor: 'default' }}>
+                  No agents connected
                 </TableCell>
               </TableRow>
             ) : (
               agents.map((agent) => (
-                <TableRow key={agent.id}>
-                  <TableCell>{agent.id}</TableCell>
-                  <TableCell>{agent.hostname}</TableCell>
-                  <TableCell>{agent.username}</TableCell>
-                  <TableCell>{agent.processname}</TableCell>
-                  <TableCell>{agent.pid}</TableCell>
+                <TableRow
+                  key={agent.id}
+                  onClick={() => navigate(`/agent/${agent.id}`)}
+                  sx={{ '&:nth-of-type(odd)': { backgroundColor: '#1e1e1e' } }}
+                >
                   <TableCell>
-                    <Chip
-                      label={agent.integrity}
-                      color={agent.integrity === 'High' ? 'success' : 'warning'}
-                      size="small"
-                    />
+                    <StatusDot lastseen={agent.lastseen} />
                   </TableCell>
+                  <TableCell>{agent.id}</TableCell>
+                  <TableCell sx={{ color: '#4e9af1' }}>{agent.hostname}</TableCell>
+                  <TableCell>{agent.username}</TableCell>
+                  <TableCell sx={{ color: '#9cdcfe' }}>{agent.processname}</TableCell>
+                  <TableCell>{agent.pid}</TableCell>
                   <TableCell>{agent.arch}</TableCell>
-                  <TableCell>
+                  <TableCell
+                    sx={{ color: agent.integrity === 'High' ? '#4caf50' : '#ddb100' }}
+                  >
+                    {agent.integrity}
+                  </TableCell>
+                  <TableCell sx={{ color: '#858585' }}>
                     {agent.lastseen ? new Date(agent.lastseen).toLocaleString() : 'Never'}
                   </TableCell>
-                  <TableCell>
-                    <Chip
-                      label={getStatusText(agent.lastseen)}
-                      color={getStatusColor(agent.lastseen)}
-                      size="small"
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', gap: 1 }}>
-                      <Button
-                        component={Link}
-                        to={`/agent/${agent.id}`}
-                        size="small"
-                        variant="outlined"
-                        startIcon={<Visibility />}
-                      >
-                        View
-                      </Button>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        color="success"
-                        startIcon={<PlayArrow />}
-                        onClick={() => handleCheckIn(agent.id)}
-                      >
-                        Check In
-                      </Button>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        color="error"
-                        startIcon={<Delete />}
-                        onClick={() => handleDelete(agent.id)}
-                      >
-                        Delete
-                      </Button>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
+                    <Box sx={{ display: 'flex', gap: 0.25 }}>
+                      <Tooltip title="Interact">
+                        <IconButton
+                          size="small"
+                          onClick={() => navigate(`/agent/${agent.id}`)}
+                          sx={{ p: 0.25 }}
+                        >
+                          <Visibility sx={{ fontSize: 14, color: '#9cdcfe' }} />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Force Check-In">
+                        <IconButton
+                          size="small"
+                          onClick={(e) => handleCheckIn(e, agent.id)}
+                          sx={{ p: 0.25 }}
+                        >
+                          <PlayArrow sx={{ fontSize: 14, color: '#4caf50' }} />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Remove">
+                        <IconButton
+                          size="small"
+                          onClick={(e) => handleDelete(e, agent.id)}
+                          sx={{ p: 0.25 }}
+                        >
+                          <Delete sx={{ fontSize: 14, color: '#f44747' }} />
+                        </IconButton>
+                      </Tooltip>
                     </Box>
                   </TableCell>
                 </TableRow>
@@ -193,14 +208,10 @@ const Agents: React.FC = () => {
 
       <Snackbar
         open={snackbar.open}
-        autoHideDuration={4000}
+        autoHideDuration={3000}
         onClose={() => setSnackbar({ ...snackbar, open: false })}
       >
-        <Alert
-          onClose={() => setSnackbar({ ...snackbar, open: false })}
-          severity={snackbar.severity}
-          sx={{ width: '100%' }}
-        >
+        <Alert severity={snackbar.severity} sx={{ width: '100%' }}>
           {snackbar.message}
         </Alert>
       </Snackbar>
