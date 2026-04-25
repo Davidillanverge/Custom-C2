@@ -8,6 +8,22 @@ builder_bp = Blueprint('builder', __name__)
 VALID_ARCHS = ('x64', 'x86', 'ARM64')
 
 
+@builder_bp.route('/check', methods=['GET'])
+def check_tools():
+    """
+    Check whether MSBuild is available on this server
+    ---
+    tags:
+      - Builder
+    responses:
+      200:
+        description: Build tool availability
+        examples:
+          application/json: {"available": true, "msbuild_path": "C:\\...\\MSBuild.exe", "error": ""}
+    """
+    return jsonify(builder_service.check())
+
+
 @builder_bp.route('/', methods=['GET'])
 def list_builds():
     """

