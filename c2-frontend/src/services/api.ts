@@ -88,7 +88,15 @@ export const listenerAPI = {
   removeListener: (name: string) => api.delete('/listeners/remove', { data: { name } }),
 };
 
+export interface BuilderCheck {
+  available: boolean;
+  archs: Record<BuildArch, boolean>;
+}
+
 export const builderAPI = {
+  check: () =>
+    api.get('/builder/check').then(r => r.data as BuilderCheck),
+
   getBuilds: () =>
     api.get('/builder/').then(r => r.data as Build[]),
 

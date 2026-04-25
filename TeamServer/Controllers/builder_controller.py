@@ -11,15 +11,15 @@ VALID_ARCHS = ('x64', 'x86', 'ARM64')
 @builder_bp.route('/check', methods=['GET'])
 def check_tools():
     """
-    Check whether MSBuild is available on this server
+    Check which pre-compiled base DLLs are available for patching
     ---
     tags:
       - Builder
     responses:
       200:
-        description: Build tool availability
+        description: DLL availability per architecture
         examples:
-          application/json: {"available": true, "msbuild_path": "C:\\...\\MSBuild.exe", "error": ""}
+          application/json: {"available": true, "archs": {"x64": true, "x86": false, "ARM64": false}}
     """
     return jsonify(builder_service.check())
 

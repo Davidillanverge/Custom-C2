@@ -99,6 +99,12 @@ coverage.xml
 *.sqlite3
 
 # =========================
+# Builder artifacts
+# =========================
+TeamServer/builds/
+AgentWindows/dist/*.dll
+
+# =========================
 # Archivos de sistema
 # =========================
 .DS_Store

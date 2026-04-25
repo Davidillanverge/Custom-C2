@@ -181,6 +181,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Agent.cpp" />
+    <ClCompile Include="AgentConfig.cpp" />
     <ClCompile Include="Cd.cpp" />
     <ClCompile Include="Ls.cpp" />
     <ClCompile Include="Pwd.cpp" />
@@ -194,6 +195,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Agent.h" />
+    <ClInclude Include="AgentConfig.h" />
     <ClInclude Include="Commands.h" />
     <ClInclude Include="Helpers.h" />
     <ClInclude Include="HttpClient.h" />
