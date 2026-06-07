@@ -129,6 +129,8 @@ Cross-platform implant (Linux / macOS).
 | `rmdir <path>` | Remove directory |
 | `download <path>` | Read a file from the agent's filesystem and send it to the operator — result appears as a **Save** button in the console |
 | `upload <dest_path>` | Write a file from the operator's machine to `<dest_path>` on the agent — select the file in the console's file picker before sending |
+| `make_token <user> <domain> <pass>` | Create a Windows access token with plaintext credentials (`LogonUserA` / `LOGON32_LOGON_NEW_CREDENTIALS`) and impersonate it on the current thread. Equivalent to `runas /netonly` — local identity unchanged, new credentials used for outbound network access. The console shows `***` in place of the password. |
+| `steal_token <pid>` | Duplicate the primary token of the target process (`OpenProcessToken` → `DuplicateTokenEx`) and impersonate it on the current thread. Requires at least `SeImpersonatePrivilege`. |
 
 ### Windows Agent (`AgentWindows/`)
 
@@ -159,6 +161,8 @@ C++ Visual Studio project that builds a **DLL**. When injected into a process, `
 | `run <path>` | Execute a binary |
 | `download <path>` | Read a file from the agent's filesystem and send it to the operator |
 | `upload <dest_path>` | Write a file from the operator's machine to `<dest_path>` on the agent |
+| `make_token <user> <domain> <pass>` | Create a token with plaintext credentials and impersonate it (`LogonUserA` + `ImpersonateLoggedOnUser`) |
+| `steal_token <pid>` | Steal the token of a running process by PID and impersonate it (`OpenProcessToken` → `DuplicateTokenEx` → `ImpersonateLoggedOnUser`) |
 
 **Binary patching** — `AgentConfig.cpp` embeds two magic-prefixed arrays in the `.data` section of the DLL:
 
@@ -454,7 +458,9 @@ C2/
 │   │       ├── MkdirCommand.py
 │   │       ├── RmdirCommand.py
 │   │       ├── DownloadCommand.py
-│   │       └── UploadCommand.py
+│   │       ├── UploadCommand.py
+│   │       ├── MakeTokenCommand.py
+│   │       └── StealTokenCommand.py
 │   └── Modules/
 │       ├── comm.py                    # CommunicationModule ABC
 │       └── httpcomm.py               # HTTP beacon loop
@@ -476,7 +482,9 @@ C2/
 │       ├── Commands.h
 │       ├── Whoami.cpp, Shell.cpp, Run.cpp, Pwd.cpp, Cd.cpp, Ls.cpp
 │       ├── Download.cpp / .h          # download command (CreateFileA + ReadFile)
-│       └── Upload.cpp / .h            # upload command (CreateFileA + WriteFile)
+│       ├── Upload.cpp / .h            # upload command (CreateFileA + WriteFile)
+│       ├── MakeToken.cpp / .h         # make_token (LogonUserA + ImpersonateLoggedOnUser)
+│       └── StealToken.cpp / .h        # steal_token (OpenProcessToken + DuplicateTokenEx)
 │
 ├── c2-frontend/                       # React 19 + TypeScript operator UI
 │   ├── src/
