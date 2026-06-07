@@ -1,4 +1,5 @@
 #pragma once
+#include <Windows.h>
 #include <cstdlib>
 
 // Magic-prefixed configuration arrays defined in AgentConfig.cpp.
