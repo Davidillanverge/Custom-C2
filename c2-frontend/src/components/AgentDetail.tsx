@@ -16,7 +16,7 @@ interface ConsoleEntry {
 const PREDEFINED_CMDS = [
   'whoami', 'id', 'pwd', 'ls', 'hostname', 'ps', 'uname -a',
   'ifconfig', 'netstat', 'cat /etc/passwd', 'download', 'upload',
-  'make_token', 'steal_token', 'rev2self', 'set_sleep',
+  'make_token', 'steal_token', 'rev2self', 'set_sleep', 'inline-assembly',
 ];
 
 const AgentDetail: React.FC = () => {
@@ -163,8 +163,8 @@ const AgentDetail: React.FC = () => {
     const cmd = command.trim();
     if (!cmd) return;
 
-    if (cmd === 'upload' && !selectedFile) {
-      appendEntry('error', 'Select a file before sending the upload command');
+    if ((cmd === 'upload' || cmd === 'inline-assembly') && !selectedFile) {
+      appendEntry('error', `Select a file before sending the ${cmd} command`);
       return;
     }
     if (cmd === 'make_token' && (!makeTokenFields.username || !makeTokenFields.password)) {
@@ -206,7 +206,7 @@ const AgentDetail: React.FC = () => {
 
   const handleCommandChange = (value: string) => {
     setCommand(value);
-    if (value !== 'upload') setSelectedFile(null);
+    if (value !== 'upload' && value !== 'inline-assembly') setSelectedFile(null);
     if (value !== 'make_token') setMakeTokenFields({ username: '', domain: '', password: '' });
     if (value !== 'set_sleep') setSleepFields({ interval: '5000', jitter: '1000' });
   };
@@ -568,8 +568,8 @@ const AgentDetail: React.FC = () => {
           onChange={handleFileSelect}
         />
 
-        {/* File picker — shown only for upload command */}
-        {command.trim() === 'upload' && (
+        {/* File picker — shown for upload and inline-assembly commands */}
+        {(command.trim() === 'upload' || command.trim() === 'inline-assembly') && (
           <>
             <Tooltip title={selectedFile ? selectedFile.name : 'Select file'}>
               <IconButton
