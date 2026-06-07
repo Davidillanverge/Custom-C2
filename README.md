@@ -127,6 +127,8 @@ Cross-platform implant (Linux / macOS).
 | `ps` | List running processes |
 | `mkdir <path>` | Create directory |
 | `rmdir <path>` | Remove directory |
+| `download <path>` | Read a file from the agent's filesystem and send it to the operator — result appears as a **Save** button in the console |
+| `upload <dest_path>` | Write a file from the operator's machine to `<dest_path>` on the agent — select the file in the console's file picker before sending |
 
 ### Windows Agent (`AgentWindows/`)
 
@@ -142,6 +144,21 @@ C++ Visual Studio project that builds a **DLL**. When injected into a process, `
 | `Helpers.cpp` / `.h` | Base64, JSON helpers, system-info (hostname, arch, integrity level) |
 | `Commands.h` | Command function declarations |
 | `Whoami.cpp`, `Shell.cpp`, `Run.cpp`, `Pwd.cpp`, `Cd.cpp`, `Ls.cpp` | Built-in command implementations |
+| `Download.cpp` / `.h` | Read a file via `CreateFileA` + `ReadFile` and return it base64-encoded |
+| `Upload.cpp` / `.h` | Decode the base64 payload from the task and write it via `CreateFileA` + `WriteFile` |
+
+**Built-in commands (Windows agent)**
+
+| Command | Description |
+|---------|-------------|
+| `whoami` | Current username |
+| `pwd` | Print working directory |
+| `cd <path>` | Change directory |
+| `ls [path]` | List directory contents |
+| `shell <cmd…>` | Run command via `cmd.exe /C` |
+| `run <path>` | Execute a binary |
+| `download <path>` | Read a file from the agent's filesystem and send it to the operator |
+| `upload <dest_path>` | Write a file from the operator's machine to `<dest_path>` on the agent |
 
 **Binary patching** — `AgentConfig.cpp` embeds two magic-prefixed arrays in the `.data` section of the DLL:
 
@@ -300,6 +317,7 @@ Interactive docs: `http://localhost:8000/apidocs`
 | `GET` | `/agents/{id}/tasks` | List all queued tasks |
 | `GET` | `/agents/{id}/results` | List all task results |
 | `GET` | `/agents/{id}/results/{task_id}` | Get result for a specific task |
+| `GET` | `/agents/{id}/results/{task_id}/file` | Download the file returned by a `download` task (serves raw bytes with `Content-Disposition: attachment`) |
 
 ### Listeners
 
@@ -378,6 +396,13 @@ class MyCommand(Command):
    ```
 4. Add the `.cpp` to `AgentWindows.vcxproj` under `<ClCompile>`.
 
+> **Commands that need `task.file`** (e.g. `upload`) cannot use the standard function pointer map because the map signature only passes `arguments`. Special-case them directly in `Agent::executeTask()` before the map lookup:
+> ```cpp
+> if (task.command == "upload") {
+>     command_output = Upload(task.arguments, task.file);
+> }
+> ```
+
 ---
 
 ## Project Structure
@@ -427,7 +452,9 @@ C2/
 │   │       ├── ShellCommand.py
 │   │       ├── PsCommand.py
 │   │       ├── MkdirCommand.py
-│   │       └── RmdirCommand.py
+│   │       ├── RmdirCommand.py
+│   │       ├── DownloadCommand.py
+│   │       └── UploadCommand.py
 │   └── Modules/
 │       ├── comm.py                    # CommunicationModule ABC
 │       └── httpcomm.py               # HTTP beacon loop
@@ -447,7 +474,9 @@ C2/
 │       ├── HttpClient.cpp / .h
 │       ├── Helpers.cpp / .h
 │       ├── Commands.h
-│       └── *.cpp                      # command implementations
+│       ├── Whoami.cpp, Shell.cpp, Run.cpp, Pwd.cpp, Cd.cpp, Ls.cpp
+│       ├── Download.cpp / .h          # download command (CreateFileA + ReadFile)
+│       └── Upload.cpp / .h            # upload command (CreateFileA + WriteFile)
 │
 ├── c2-frontend/                       # React 19 + TypeScript operator UI
 │   ├── src/
