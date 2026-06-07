@@ -63,6 +63,21 @@ std::string InlineAssembly(std::vector<std::string> arguments, const std::string
         DWORD clrRva = *reinterpret_cast<const DWORD*>(bytes + optOffset + clrEntryOffset);
         if (clrRva == 0)
             return "Error: not a managed assembly (no CLR header) — select a .NET EXE or DLL";
+
+        // Check machine type against the current process architecture.
+        // The ARM64 CLR (v4.0.30319) rejects AMD64 assemblies with ERROR_BAD_FORMAT.
+        // AnyCPU assemblies have Machine=IMAGE_FILE_MACHINE_I386 + COMIMAGE_FLAGS_ILONLY.
+        WORD machine = *reinterpret_cast<const WORD*>(bytes + peOffset + 4);
+        SYSTEM_INFO si = {};
+        GetNativeSystemInfo(&si);
+        bool processIsArm64 = (si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_ARM64);
+
+        if (processIsArm64 && machine == 0x8664 /* AMD64 */) {
+            return "Error: x64 assembly cannot run in ARM64 native process. "
+                   "Recompile the assembly as AnyCPU: "
+                   "set <PlatformTarget>AnyCPU</PlatformTarget> in the .csproj "
+                   "and ensure <Prefer32Bit>false</Prefer32Bit>.";
+        }
     }
 
     // ── CLR variable declarations ─────────────────────────────────────────────
