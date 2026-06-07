@@ -8,7 +8,9 @@
 
 // Import mscorlib type library — MSVC generates mscorlib.tlh/.tli on first build.
 // Requires .NET Framework 4.x to be installed on the build machine.
-#import <mscorlib.tlb> raw_interfaces_only \
+// auto_rename: renames identifiers that clash with C++ reserved words (e.g. 'or' -> 'or__')
+//              which prevents the || parse errors in the generated TLH.
+#import <mscorlib.tlb> raw_interfaces_only auto_rename \
     rename("ReportEvent", "MSCOREE_ReportEvent") \
     rename("value",       "MSCOREE_value")        \
     rename("Currency",    "MSCOREE_Currency")
