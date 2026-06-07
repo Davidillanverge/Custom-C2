@@ -16,6 +16,7 @@ interface ConsoleEntry {
 const PREDEFINED_CMDS = [
   'whoami', 'id', 'pwd', 'ls', 'hostname', 'ps', 'uname -a',
   'ifconfig', 'netstat', 'cat /etc/passwd', 'download', 'upload',
+  'make_token', 'steal_token',
 ];
 
 const AgentDetail: React.FC = () => {
@@ -31,6 +32,8 @@ const AgentDetail: React.FC = () => {
 
   const [selectedFile, setSelectedFile] = useState<{ name: string; base64: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [makeTokenFields, setMakeTokenFields] = useState({ username: '', domain: '', password: '' });
 
   const consoleEndRef = useRef<HTMLDivElement>(null);
   const seenResultIds = useRef<Set<number>>(new Set());
@@ -158,21 +161,38 @@ const AgentDetail: React.FC = () => {
   const handleSend = async () => {
     const cmd = command.trim();
     if (!cmd) return;
+
     if (cmd === 'upload' && !selectedFile) {
       appendEntry('error', 'Select a file before sending the upload command');
       return;
     }
+    if (cmd === 'make_token' && (!makeTokenFields.username || !makeTokenFields.password)) {
+      appendEntry('error', 'Username and password are required for make_token');
+      return;
+    }
 
-    const fullCmd = args.trim() ? `${cmd} ${args.trim()}` : cmd;
-    appendEntry('command', fullCmd);
+    let displayCmd: string;
+    let taskArguments: string[];
+
+    if (cmd === 'make_token') {
+      // Mask password in the console log
+      displayCmd = `make_token ${makeTokenFields.username} ${makeTokenFields.domain || '.'} ***`;
+      taskArguments = [makeTokenFields.username, makeTokenFields.domain || '.', makeTokenFields.password];
+    } else {
+      displayCmd = args.trim() ? `${cmd} ${args.trim()}` : cmd;
+      taskArguments = args.trim() ? args.trim().split(/\s+/) : [];
+    }
+
+    appendEntry('command', displayCmd);
     setCommand('');
     setArgs('');
     setSelectedFile(null);
+    setMakeTokenFields({ username: '', domain: '', password: '' });
 
     try {
       await agentAPI.sendTask(agentId, {
         command: cmd,
-        arguments: args.trim() ? args.trim().split(/\s+/) : [],
+        arguments: taskArguments,
         file: selectedFile?.base64 ?? '',
       });
     } catch {
@@ -183,6 +203,7 @@ const AgentDetail: React.FC = () => {
   const handleCommandChange = (value: string) => {
     setCommand(value);
     if (value !== 'upload') setSelectedFile(null);
+    if (value !== 'make_token') setMakeTokenFields({ username: '', domain: '', password: '' });
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -460,24 +481,51 @@ const AgentDetail: React.FC = () => {
             '& input': { color: '#ffffff', padding: '3px 8px', fontSize: '12px' },
           }}
         />
-        <TextField
-          value={args}
-          onChange={(e) => setArgs(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="arguments"
-          variant="outlined"
-          size="small"
-          sx={{
-            flex: 1,
-            '& .MuiOutlinedInput-root': {
-              backgroundColor: '#0c0c0c',
-              '& fieldset': { borderColor: '#3c3c3c' },
-              '&:hover fieldset': { borderColor: '#555' },
-              '&.Mui-focused fieldset': { borderColor: '#4e9af1' },
-            },
-            '& input': { color: '#ffffff', padding: '3px 8px', fontSize: '12px' },
-          }}
-        />
+        {command.trim() === 'make_token' ? (
+          <>
+            {(['username', 'domain', 'password'] as const).map((field) => (
+              <TextField
+                key={field}
+                value={makeTokenFields[field]}
+                onChange={(e) => setMakeTokenFields((prev) => ({ ...prev, [field]: e.target.value }))}
+                onKeyDown={handleKeyDown}
+                placeholder={field === 'domain' ? 'domain (opt.)' : field}
+                type={field === 'password' ? 'password' : 'text'}
+                variant="outlined"
+                size="small"
+                sx={{
+                  flex: field === 'password' ? 1.5 : 1,
+                  '& .MuiOutlinedInput-root': {
+                    backgroundColor: '#0c0c0c',
+                    '& fieldset': { borderColor: field === 'password' ? '#5a3a3a' : '#3c3c3c' },
+                    '&:hover fieldset': { borderColor: '#555' },
+                    '&.Mui-focused fieldset': { borderColor: '#4e9af1' },
+                  },
+                  '& input': { color: '#ffffff', padding: '3px 8px', fontSize: '12px' },
+                }}
+              />
+            ))}
+          </>
+        ) : (
+          <TextField
+            value={args}
+            onChange={(e) => setArgs(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="arguments"
+            variant="outlined"
+            size="small"
+            sx={{
+              flex: 1,
+              '& .MuiOutlinedInput-root': {
+                backgroundColor: '#0c0c0c',
+                '& fieldset': { borderColor: '#3c3c3c' },
+                '&:hover fieldset': { borderColor: '#555' },
+                '&.Mui-focused fieldset': { borderColor: '#4e9af1' },
+              },
+              '& input': { color: '#ffffff', padding: '3px 8px', fontSize: '12px' },
+            }}
+          />
+        )}
         {/* Hidden file input */}
         <input
           type="file"

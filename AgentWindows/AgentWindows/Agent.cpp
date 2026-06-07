@@ -20,7 +20,9 @@ std::unordered_map<std::string, std::string(*)(std::vector<std::string> argument
 	commands["pwd"] = &pwd;
 	commands["cd"] = &Cd;
 	commands["ls"] = &Ls;
-	commands["download"] = &Download;
+	commands["download"]    = &Download;
+	commands["make_token"]  = &MakeToken;
+	commands["steal_token"] = &StealToken;
 
 	return commands;
 }
