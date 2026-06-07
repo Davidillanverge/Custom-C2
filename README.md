@@ -29,12 +29,12 @@ Manage HTTP listeners. Create new ones on any port; stop and remove them at any 
 ![Listeners](docs/screenshots/listeners.png)
 
 ### Builder
-Generate ready-to-deploy agent DLLs by patching a pre-compiled binary with your listener's IP and port. The toolbar shows which architectures have a base DLL available.
+Generate ready-to-deploy agent DLLs by patching a pre-compiled binary with your listener's IP, port, beacon sleep interval, and jitter. The toolbar shows which architectures have a base DLL available.
 
 ![Builder](docs/screenshots/builder.png)
 
 ### Builder — New Build Dialog
-Select target architecture (only architectures with a base DLL in `AgentWindows/dist/` are enabled), enter the listener host and port, and click Build. Patching completes in under a millisecond.
+Select target architecture (only architectures with a base DLL in `AgentWindows/dist/` are enabled), enter the listener host, port, sleep interval (ms), and jitter (ms), and click Build. Patching completes in under a millisecond.
 
 ![Builder Dialog](docs/screenshots/builder-dialog.png)
 
@@ -94,7 +94,7 @@ Flask REST API consumed by the operator frontend and the HTTP listener.
 | `Controllers/builder_controller.py` | Agent builder — check DLL availability, patch & serve |
 | `Services/agent_service.py` | Thread-safe in-memory agent store (singleton + `threading.Lock`) |
 | `Services/listeners_service.py` | In-memory listener store (singleton) |
-| `Services/builder_service.py` | Binary patcher — finds magic markers in DLL and overwrites them |
+| `Services/builder_service.py` | Binary patcher — finds four magic markers in DLL (host, port, sleep, jitter) and overwrites them |
 | `Models/Agent/` | `Agent`, `AgentMetadata`, `Task`, `TaskResult` |
 | `Models/Listener/` | `Listener` ABC, `HTTPListener`, `HTTPRequestHandler` |
 | `Models/Build/` | `Build` dataclass, `BuildStatus` enum |
@@ -114,7 +114,7 @@ Cross-platform implant (Linux / macOS).
 | `Models/AgentMetadata.py` | Beacon metadata (id, hostname, username, …) |
 | `Models/Task.py` / `TaskResult.py` | Task and result data classes |
 | `Models/Commands/` | Built-in command implementations (auto-discovered via `pkgutil`) |
-| `Modules/httpcomm.py` | HTTP communication module — beacons every 5 s |
+| `Modules/httpcomm.py` | HTTP communication module — beacons at a configurable interval with ± jitter |
 
 **Built-in commands**
 
@@ -132,6 +132,7 @@ Cross-platform implant (Linux / macOS).
 | `make_token <user> <domain> <pass>` | Create a Windows access token with plaintext credentials (`LogonUserA` / `LOGON32_LOGON_NEW_CREDENTIALS`) and impersonate it on the current thread. Equivalent to `runas /netonly` — local identity unchanged, new credentials used for outbound network access. The console shows `***` in place of the password. |
 | `steal_token <pid>` | Duplicate the primary token of the target process (`OpenProcessToken` → `DuplicateTokenEx`) and impersonate it on the current thread. Requires at least `SeImpersonatePrivilege`. |
 | `rev2self` | Drop any active impersonation and revert the thread to its original security context (`RevertToSelf`). Also closes the handle stored by `make_token`. |
+| `set_sleep <interval_ms> <jitter_ms>` | Adjust the beacon interval and jitter at runtime — takes effect on the next beacon cycle |
 
 ### Windows Agent (`AgentWindows/`)
 
@@ -140,9 +141,9 @@ C++ Visual Studio project that builds a **DLL**. When injected into a process, `
 | File | Purpose |
 |------|---------|
 | `main.cpp` | `DllMain` entry point + `AgentThread` worker |
-| `AgentConfig.cpp` / `AgentConfig.h` | Magic-prefixed config arrays patched by TeamServer |
+| `AgentConfig.cpp` / `AgentConfig.h` | Four magic-prefixed config arrays (host, port, sleep ms, jitter ms) patched by TeamServer at build time |
 | `Agent.cpp` / `Agent.h` | Task queue, result queue, command dispatch |
-| `HTTPCommunicationModule.cpp` / `.h` | HTTP beaconing loop (WinHTTP) |
+| `HTTPCommunicationModule.cpp` / `.h` | HTTP beaconing loop (WinHTTP) — interruptible sleep with jitter via `WaitForSingleObject` |
 | `HttpClient.cpp` / `.h` | Low-level WinHTTP wrapper |
 | `Helpers.cpp` / `.h` | Base64, JSON helpers, system-info (hostname, arch, integrity level) |
 | `Commands.h` | Command function declarations |
@@ -165,15 +166,20 @@ C++ Visual Studio project that builds a **DLL**. When injected into a process, `
 | `make_token <user> <domain> <pass>` | Create a token with plaintext credentials and impersonate it (`LogonUserA` + `ImpersonateLoggedOnUser`) |
 | `steal_token <pid>` | Steal the token of a running process by PID and impersonate it (`OpenProcessToken` → `DuplicateTokenEx` → `ImpersonateLoggedOnUser`) |
 | `rev2self` | Drop any active impersonation and restore the original thread security context (`RevertToSelf`) |
+| `set_sleep <interval_ms> <jitter_ms>` | Adjust the beacon interval and jitter at runtime — takes effect on the next beacon cycle |
 
-**Binary patching** — `AgentConfig.cpp` embeds two magic-prefixed arrays in the `.data` section of the DLL:
+**Binary patching** — `AgentConfig.cpp` embeds four magic-prefixed arrays in the `.data` section of the DLL:
 
 ```
-AGENT_C2_HOST_CFG:  [0xDE AD BE EF C2 C2 C2 C2] [hostname/IP, null-padded to 64 bytes]
-AGENT_C2_PORT_CFG:  [0xDE AD BE EF C2 C2 C2 C3] [port string, null-padded to  8 bytes]
+AGENT_C2_HOST_CFG:     [0xDE AD BE EF C2 C2 C2 C2] [hostname/IP,     null-padded to 64 bytes]
+AGENT_C2_PORT_CFG:     [0xDE AD BE EF C2 C2 C2 C3] [port string,     null-padded to  8 bytes]
+AGENT_C2_SLEEP_MS_CFG: [0xDE AD BE EF C2 C2 C2 C4] [sleep ms string, null-padded to  8 bytes]
+AGENT_C2_JITTER_MS_CFG:[0xDE AD BE EF C2 C2 C2 C5] [jitter ms string,null-padded to  8 bytes]
 ```
 
 The TeamServer's `BuilderService._patch_dll()` scans the compiled DLL bytes for each 8-byte magic prefix and overwrites the payload bytes that follow with the operator-supplied values. No recompilation needed.
+
+The agent reads all four values at startup via `GetAgentHost()`, `GetAgentPort()`, `GetBeaconSleepMs()`, and `GetBeaconJitterMs()` (inline helpers in `AgentConfig.h`). The beacon interval and jitter can also be changed at runtime with `set_sleep`.
 
 ### Frontend (`c2-frontend/`)
 
@@ -185,7 +191,7 @@ React 19 + TypeScript operator UI. MUI v7 dark theme. No global state manager �
 | `/agents` | `Agents` | Agent table — status dot, metadata, interact / check-in / remove actions |
 | `/agent/:id` | `AgentDetail` | Terminal console — send tasks, poll results every 5 s, quick-command chips |
 | `/listeners` | `Listeners` | Create / remove HTTP listeners |
-| `/builder` | `Builder` | Patch pre-compiled DLL with listener host/port, download result |
+| `/builder` | `Builder` | Patch pre-compiled DLL with listener host/port/sleep/jitter, download result |
 
 ---
 
@@ -277,9 +283,11 @@ The TeamServer checks this folder at startup. The Builder page shows a ✓/✗ i
 
 1. Navigate to **Builder → New Build**.
 2. Enter the listener **Host** and **Port**.
-3. Select the target **Architecture** (only architectures with a base DLL are enabled).
-4. Click **Build** — patching completes instantly.
-5. Click the download icon to save the ready-to-deploy DLL.
+3. Set **Sleep (ms)** — beacon interval (minimum 100 ms, default 5000).
+4. Set **Jitter (ms)** — random ± offset applied each cycle (must be less than sleep, default 1000).
+5. Select the target **Architecture** (only architectures with a base DLL are enabled).
+6. Click **Build** — patching completes instantly.
+7. Click the download icon to save the ready-to-deploy DLL.
 
 ### Deploying the DLL
 
@@ -298,6 +306,8 @@ All configuration is currently hardcoded. Key values to change:
 | `Agent/main.py:25` | Listener port (Python agent) | `8080` |
 | `AgentWindows/AgentWindows/AgentConfig.cpp` | Default host in base DLL | `172.16.97.1` |
 | `AgentWindows/AgentWindows/AgentConfig.cpp` | Default port in base DLL | `8080` |
+| `AgentWindows/AgentWindows/AgentConfig.cpp` | Default beacon sleep in base DLL | `5000` ms |
+| `AgentWindows/AgentWindows/AgentConfig.cpp` | Default beacon jitter in base DLL | `1000` ms |
 | `c2-frontend/src/services/api.ts:54` | TeamServer base URL | `http://localhost:8000` |
 
 The base DLL defaults in `AgentConfig.cpp` only matter for manual runs directly from Visual Studio; they are always overwritten by the patcher before delivery.
@@ -340,7 +350,7 @@ Interactive docs: `http://localhost:8000/apidocs`
 |--------|------|-------------|
 | `GET` | `/builder/check` | Check which arch DLLs are available for patching |
 | `GET` | `/builder/` | List all builds |
-| `POST` | `/builder/` | Patch a DLL — body: `{host, port, arch}` → returns Build |
+| `POST` | `/builder/` | Patch a DLL — body: `{host, port, arch, sleep_ms?, jitter_ms?}` → returns Build |
 | `GET` | `/builder/{id}` | Get build status and metadata |
 | `GET` | `/builder/{id}/download` | Download the patched DLL |
 | `DELETE` | `/builder/{id}` | Delete build record and artifact |
