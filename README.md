@@ -134,6 +134,8 @@ Cross-platform implant (Linux / macOS).
 | `rev2self` | Drop any active impersonation and revert the thread to its original security context (`RevertToSelf`). Also closes the handle stored by `make_token`. |
 | `set_sleep <interval_ms> <jitter_ms>` | Adjust the beacon interval and jitter at runtime — takes effect on the next beacon cycle |
 
+> `inline-assembly` is Windows-only and is not available in the Python agent.
+
 ### Windows Agent (`AgentWindows/`)
 
 C++ Visual Studio project that builds a **DLL**. When injected into a process, `DllMain` fires on `DLL_PROCESS_ATTACH` and starts the agent on a new thread without blocking the loader lock.
@@ -150,6 +152,7 @@ C++ Visual Studio project that builds a **DLL**. When injected into a process, `
 | `Whoami.cpp`, `Shell.cpp`, `Run.cpp`, `Pwd.cpp`, `Cd.cpp`, `Ls.cpp` | Built-in command implementations |
 | `Download.cpp` / `.h` | Read a file via `CreateFileA` + `ReadFile` and return it base64-encoded |
 | `Upload.cpp` / `.h` | Decode the base64 payload from the task and write it via `CreateFileA` + `WriteFile` |
+| `InlineAssembly.cpp` / `.h` | Load and run a .NET assembly in-memory via `ICLRMetaHost` / `ICorRuntimeHost`; stdout captured with a pipe |
 
 **Built-in commands (Windows agent)**
 
@@ -167,6 +170,7 @@ C++ Visual Studio project that builds a **DLL**. When injected into a process, `
 | `steal_token <pid>` | Steal the token of a running process by PID and impersonate it (`OpenProcessToken` → `DuplicateTokenEx` → `ImpersonateLoggedOnUser`) |
 | `rev2self` | Drop any active impersonation and restore the original thread security context (`RevertToSelf`) |
 | `set_sleep <interval_ms> <jitter_ms>` | Adjust the beacon interval and jitter at runtime — takes effect on the next beacon cycle |
+| `inline-assembly [args…]` | Execute a .NET EXE or DLL **in-memory** via CLR hosting (`ICLRMetaHost` / `ICorRuntimeHost`). The assembly is loaded into a new AppDomain with `AppDomain::Load_3`; stdout is captured through an anonymous pipe and returned as the command output. Select the assembly in the frontend file picker; optional arguments are forwarded to `Main`. Requires .NET Framework 4.x in the target process. |
 
 **Binary patching** — `AgentConfig.cpp` embeds four magic-prefixed arrays in the `.data` section of the DLL:
 
@@ -498,7 +502,8 @@ C2/
 │       ├── Upload.cpp / .h            # upload command (CreateFileA + WriteFile)
 │       ├── MakeToken.cpp / .h         # make_token (LogonUserA + ImpersonateLoggedOnUser)
 │       ├── StealToken.cpp / .h        # steal_token (OpenProcessToken + DuplicateTokenEx)
-│       └── Rev2Self.cpp / .h          # rev2self (RevertToSelf)
+│       ├── Rev2Self.cpp / .h          # rev2self (RevertToSelf)
+│       └── InlineAssembly.cpp / .h    # inline-assembly (.NET in-memory via CLR hosting)
 │
 ├── c2-frontend/                       # React 19 + TypeScript operator UI
 │   ├── src/
