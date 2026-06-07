@@ -17,6 +17,13 @@
 
 #define PIPE_BUFFER_LENGTH 0x10000
 
+// Helper: format an HRESULT as hex string.
+static std::string hrStr(HRESULT hr) {
+    char buf[16];
+    sprintf_s(buf, "0x%08lX", hr);
+    return buf;
+}
+
 std::string InlineAssembly(std::vector<std::string> arguments, const std::string& file_data) {
     if (file_data.empty())
         return "Error: no assembly data";
@@ -25,6 +32,65 @@ std::string InlineAssembly(std::vector<std::string> arguments, const std::string
     if (assembly_bytes.empty())
         return "Error: failed to decode assembly";
 
+    // ── PE / managed-assembly header validation ──────────────────────────────
+    // DataDirectory[14] (CLR COM descriptor) must be present and non-zero.
+    // Correct offsets from the start of the optional header:
+    //   PE32  (magic=0x10B): DataDirectory starts at +0x60, entry 14 at +0x60+14*8 = +0xD0
+    //   PE32+ (magic=0x20B): DataDirectory starts at +0x70, entry 14 at +0x70+14*8 = +0xE0
+    {
+        const auto*  bytes = reinterpret_cast<const BYTE*>(assembly_bytes.data());
+        const SIZE_T size  = assembly_bytes.size();
+
+        if (size < 64 || bytes[0] != 'M' || bytes[1] != 'Z')
+            return "Error: not a PE file (missing MZ header) — select a managed .NET assembly";
+
+        DWORD peOffset = *reinterpret_cast<const DWORD*>(bytes + 0x3C);
+        if (size < static_cast<SIZE_T>(peOffset) + 24)
+            return "Error: PE header truncated";
+
+        if (bytes[peOffset]   != 'P' || bytes[peOffset+1] != 'E' ||
+            bytes[peOffset+2] != 0   || bytes[peOffset+3] != 0)
+            return "Error: invalid PE signature — select a managed .NET assembly";
+
+        DWORD optOffset = peOffset + 24;
+        WORD  magic     = *reinterpret_cast<const WORD*>(bytes + optOffset);
+        // DataDirectory[14] offset from optional header start
+        DWORD clrEntryOffset = (magic == 0x20B) ? 0xE0 : 0xD0;
+
+        if (size < static_cast<SIZE_T>(optOffset) + clrEntryOffset + 8)
+            return "Error: optional header too short — select a managed .NET EXE or DLL";
+
+        DWORD clrRva = *reinterpret_cast<const DWORD*>(bytes + optOffset + clrEntryOffset);
+        if (clrRva == 0)
+            return "Error: not a managed assembly (no CLR header) — select a .NET EXE or DLL";
+    }
+
+    // ── CLR variable declarations ─────────────────────────────────────────────
+    HRESULT                 HResult         = S_OK;
+    const char*             failedStep      = nullptr;
+    ICLRMetaHost*           IMetaHost       = nullptr;
+    ICLRRuntimeInfo*        IRuntimeInfo    = nullptr;
+    ICorRuntimeHost*        IRuntimeHost    = nullptr;
+    IUnknown*               IAppDomainThunk = nullptr;
+    mscorlib::_AppDomain*   AppDomain       = nullptr;
+    mscorlib::_Assembly*    Assembly        = nullptr;
+    mscorlib::_MethodInfo*  MethodInfo      = nullptr;
+    SAFEARRAYBOUND          SafeArrayBound  = {};
+    SAFEARRAY*              SafeAssembly    = nullptr;
+    SAFEARRAY*              SafeExpected    = nullptr;
+    SAFEARRAY*              SafeArguments   = nullptr;
+    PWSTR*                  AssemblyArgv    = nullptr;
+    ULONG                   AssemblyArgc    = 0;
+    LONG                    Index           = 0;
+    VARIANT                 VariantArgv     = {};
+    BOOL                    IsLoadable      = FALSE;
+    HWND                    ConExist        = nullptr;
+    HWND                    ConHandle       = nullptr;
+    HANDLE                  BackupHandle    = nullptr;
+    HANDLE                  IoPipeRead      = nullptr;
+    HANDLE                  IoPipeWrite     = nullptr;
+    std::string             output;
+
     // Build wide argument string for CommandLineToArgvW
     std::wstring wargs;
     for (size_t i = 0; i < arguments.size(); i++) {
@@ -32,127 +98,55 @@ std::string InlineAssembly(std::vector<std::string> arguments, const std::string
         wargs += std::wstring(arguments[i].begin(), arguments[i].end());
     }
 
-    HRESULT                      HResult         = S_OK;
-    ICLRMetaHost*                IMetaHost       = nullptr;
-    ICLRRuntimeInfo*             IRuntimeInfo    = nullptr;
-    ICorRuntimeHost*             IRuntimeHost    = nullptr;
-    IUnknown*                    IAppDomainThunk = nullptr;
-    mscorlib::_AppDomain*        AppDomain       = nullptr;
-    mscorlib::_Assembly*         Assembly        = nullptr;
-    mscorlib::_MethodInfo*       MethodInfo      = nullptr;
-    SAFEARRAYBOUND               SafeArrayBound  = {};
-    SAFEARRAY*                   SafeAssembly    = nullptr;
-    SAFEARRAY*                   SafeExpected    = nullptr;
-    SAFEARRAY*                   SafeArguments   = nullptr;
-    PWSTR*                       AssemblyArgv    = nullptr;
-    ULONG                        AssemblyArgc    = 0;
-    LONG                         Index           = 0;
-    VARIANT                      VariantArgv     = {};
-    BOOL                         IsLoadable      = FALSE;
-    HWND                         ConExist        = nullptr;
-    HWND                         ConHandle       = nullptr;
-    HANDLE                       BackupHandle    = nullptr;
-    HANDLE                       IoPipeRead      = nullptr;
-    HANDLE                       IoPipeWrite     = nullptr;
-    std::string                  output;
+#define CLR_STEP(expr, name)                        \
+    failedStep = name;                              \
+    if (FAILED(HResult = (expr))) goto _CLEANUP;
 
     // ── CLR bootstrap ────────────────────────────────────────────────────────
-    if (FAILED(HResult = CLRCreateInstance(CLSID_CLRMetaHost, IID_ICLRMetaHost,
-            reinterpret_cast<PVOID*>(&IMetaHost))))
-        goto _CLEANUP;
+    CLR_STEP(CLRCreateInstance(CLSID_CLRMetaHost, IID_ICLRMetaHost,
+                 reinterpret_cast<PVOID*>(&IMetaHost)),
+             "CLRCreateInstance")
 
-    if (FAILED(HResult = IMetaHost->GetRuntime(L"v4.0.30319", IID_ICLRRuntimeInfo,
-            reinterpret_cast<PVOID*>(&IRuntimeInfo))))
-        goto _CLEANUP;
+    CLR_STEP(IMetaHost->GetRuntime(L"v4.0.30319", IID_ICLRRuntimeInfo,
+                 reinterpret_cast<PVOID*>(&IRuntimeInfo)),
+             "GetRuntime(v4.0.30319)")
 
+    failedStep = "IsLoadable";
     if (FAILED(HResult = IRuntimeInfo->IsLoadable(&IsLoadable)) || !IsLoadable) {
         if (SUCCEEDED(HResult)) HResult = E_FAIL;
         goto _CLEANUP;
     }
 
-    if (FAILED(HResult = IRuntimeInfo->GetInterface(CLSID_CorRuntimeHost, IID_ICorRuntimeHost,
-            reinterpret_cast<PVOID*>(&IRuntimeHost))))
-        goto _CLEANUP;
+    CLR_STEP(IRuntimeInfo->GetInterface(CLSID_CorRuntimeHost, IID_ICorRuntimeHost,
+                 reinterpret_cast<PVOID*>(&IRuntimeHost)),
+             "GetInterface(CorRuntimeHost)")
 
-    if (FAILED(HResult = IRuntimeHost->Start()))
-        goto _CLEANUP;
+    CLR_STEP(IRuntimeHost->Start(), "IRuntimeHost::Start")
 
     // ── AppDomain ────────────────────────────────────────────────────────────
-    if (FAILED(HResult = IRuntimeHost->CreateDomain(L"InlineAssembly", nullptr, &IAppDomainThunk)))
-        goto _CLEANUP;
+    CLR_STEP(IRuntimeHost->CreateDomain(L"InlineAssembly", nullptr, &IAppDomainThunk),
+             "CreateDomain")
 
-    if (FAILED(HResult = IAppDomainThunk->QueryInterface(IID_PPV_ARGS(&AppDomain))))
-        goto _CLEANUP;
-
-    // ── Validate PE / managed-assembly header before calling into the CLR ────
-    //   Avoids the opaque 0x8007000B (ERROR_BAD_FORMAT) from Load_3 when the
-    //   file is a native DLL/EXE or simply the wrong file.
-    {
-        const auto* bytes = reinterpret_cast<const BYTE*>(assembly_bytes.data());
-        const SIZE_T size  = assembly_bytes.size();
-
-        // MZ header
-        if (size < 64 || bytes[0] != 'M' || bytes[1] != 'Z') {
-            output = "Error: not a PE file (missing MZ header) — select a managed .NET assembly";
-            goto _CLEANUP;
-        }
-
-        // PE signature offset is at MZ+0x3C
-        DWORD peOffset = *reinterpret_cast<const DWORD*>(bytes + 0x3C);
-        if (size < static_cast<SIZE_T>(peOffset) + 24) {
-            output = "Error: PE header truncated — file may be corrupted";
-            goto _CLEANUP;
-        }
-        if (bytes[peOffset] != 'P' || bytes[peOffset+1] != 'E' ||
-            bytes[peOffset+2] != 0  || bytes[peOffset+3] != 0) {
-            output = "Error: invalid PE signature — select a managed .NET assembly";
-            goto _CLEANUP;
-        }
-
-        // CLR COM descriptor directory (entry 14) must be non-zero.
-        // Its RVA is at optional-header start + 0x70 (PE32) or + 0x80 (PE32+).
-        WORD machine = *reinterpret_cast<const WORD*>(bytes + peOffset + 4);
-        WORD optSize = *reinterpret_cast<const WORD*>(bytes + peOffset + 20);
-        if (optSize < 0x70) {
-            output = "Error: no optional header — select a managed .NET assembly";
-            goto _CLEANUP;
-        }
-        DWORD optOffset = peOffset + 24;
-        WORD  magic     = *reinterpret_cast<const WORD*>(bytes + optOffset);
-        DWORD clrDirOffset = optOffset + (magic == 0x20B ? 0x80 : 0x70); // PE32+ vs PE32
-        if (size < static_cast<SIZE_T>(clrDirOffset) + 8) {
-            output = "Error: optional header too short — select a managed .NET assembly";
-            goto _CLEANUP;
-        }
-        DWORD clrRva = *reinterpret_cast<const DWORD*>(bytes + clrDirOffset);
-        if (clrRva == 0) {
-            output = "Error: not a managed assembly (no CLR header) — select a .NET EXE or DLL";
-            goto _CLEANUP;
-        }
-    }
+    CLR_STEP(IAppDomainThunk->QueryInterface(IID_PPV_ARGS(&AppDomain)),
+             "QueryInterface(_AppDomain)")
 
     // ── Load assembly bytes via SAFEARRAY ────────────────────────────────────
     {
         PVOID pvData = nullptr;
         SafeArrayBound = { static_cast<ULONG>(assembly_bytes.size()), 0 };
         SafeAssembly   = SafeArrayCreate(VT_UI1, 1, &SafeArrayBound);
-        if (!SafeAssembly) { HResult = E_OUTOFMEMORY; goto _CLEANUP; }
-        // Use SafeArrayAccessData for correct locked access
-        if (FAILED(HResult = SafeArrayAccessData(SafeAssembly, &pvData)))
-            goto _CLEANUP;
+        if (!SafeAssembly) { HResult = E_OUTOFMEMORY; failedStep = "SafeArrayCreate"; goto _CLEANUP; }
+        failedStep = "SafeArrayAccessData";
+        if (FAILED(HResult = SafeArrayAccessData(SafeAssembly, &pvData))) goto _CLEANUP;
         memcpy(pvData, assembly_bytes.data(), assembly_bytes.size());
         SafeArrayUnaccessData(SafeAssembly);
     }
 
-    if (FAILED(HResult = AppDomain->Load_3(SafeAssembly, &Assembly)))
-        goto _CLEANUP;
+    CLR_STEP(AppDomain->Load_3(SafeAssembly, &Assembly), "AppDomain::Load_3")
 
     // ── Entry point ──────────────────────────────────────────────────────────
-    if (FAILED(HResult = Assembly->get_EntryPoint(&MethodInfo)))
-        goto _CLEANUP;
-
-    if (FAILED(HResult = MethodInfo->GetParameters(&SafeExpected)))
-        goto _CLEANUP;
+    CLR_STEP(Assembly->get_EntryPoint(&MethodInfo), "Assembly::get_EntryPoint")
+    CLR_STEP(MethodInfo->GetParameters(&SafeExpected), "MethodInfo::GetParameters")
 
     // ── Build argument SAFEARRAY (only if entry point expects parameters) ────
     if (SafeExpected && SafeExpected->cDims && SafeExpected->rgsabound[0].cElements) {
@@ -175,6 +169,7 @@ std::string InlineAssembly(std::vector<std::string> arguments, const std::string
     // ── Pipe + stdout redirect ───────────────────────────────────────────────
     if (!CreatePipe(&IoPipeRead, &IoPipeWrite, nullptr, PIPE_BUFFER_LENGTH)) {
         HResult = HRESULT_FROM_WIN32(GetLastError());
+        failedStep = "CreatePipe";
         goto _CLEANUP;
     }
 
@@ -190,9 +185,10 @@ std::string InlineAssembly(std::vector<std::string> arguments, const std::string
     // ── Invoke entry point ───────────────────────────────────────────────────
     MethodInfo->Invoke_3(VARIANT(), SafeArguments, nullptr);
 
-    // Restore stdout before reading so console I/O isn't disrupted
+    // Restore stdout before reading
     SetStdHandle(STD_OUTPUT_HANDLE, BackupHandle);
     BackupHandle = nullptr;
+    failedStep   = nullptr;
 
     // ── Drain pipe (non-blocking) ────────────────────────────────────────────
     {
@@ -206,31 +202,29 @@ std::string InlineAssembly(std::vector<std::string> arguments, const std::string
         }
     }
 
-_CLEANUP:
-    if (BackupHandle)             SetStdHandle(STD_OUTPUT_HANDLE, BackupHandle);
-    if (AssemblyArgv)             LocalFree(AssemblyArgv);
-    if (SafeAssembly)             SafeArrayDestroy(SafeAssembly);
-    if (SafeArguments)            SafeArrayDestroy(SafeArguments);
-    if (MethodInfo)               MethodInfo->Release();
-    if (AppDomain)                AppDomain->Release();
-    if (IAppDomainThunk)          IAppDomainThunk->Release();
-    if (IRuntimeHost)             IRuntimeHost->Release();
-    if (IRuntimeInfo)             IRuntimeInfo->Release();
-    if (IMetaHost)                IMetaHost->Release();
-    if (IoPipeWrite)              CloseHandle(IoPipeWrite);
-    if (IoPipeRead)               CloseHandle(IoPipeRead);
-    if (ConHandle && !ConExist)   FreeConsole();
+#undef CLR_STEP
 
-    // Validation errors are written to output directly (HResult stays S_OK).
-    if (!output.empty() && SUCCEEDED(HResult))
-        return output;
+_CLEANUP:
+    if (BackupHandle)           SetStdHandle(STD_OUTPUT_HANDLE, BackupHandle);
+    if (AssemblyArgv)           LocalFree(AssemblyArgv);
+    if (SafeAssembly)           SafeArrayDestroy(SafeAssembly);
+    if (SafeArguments)          SafeArrayDestroy(SafeArguments);
+    if (MethodInfo)             MethodInfo->Release();
+    if (AppDomain)              AppDomain->Release();
+    if (IAppDomainThunk)        IAppDomainThunk->Release();
+    if (IRuntimeHost)           IRuntimeHost->Release();
+    if (IRuntimeInfo)           IRuntimeInfo->Release();
+    if (IMetaHost)              IMetaHost->Release();
+    if (IoPipeWrite)            CloseHandle(IoPipeWrite);
+    if (IoPipeRead)             CloseHandle(IoPipeRead);
+    if (ConHandle && !ConExist) FreeConsole();
 
     if (FAILED(HResult)) {
-        if (!output.empty())
-            return output; // validation message already set
-        char hrbuf[16];
-        sprintf_s(hrbuf, "0x%08lX", HResult);
-        return std::string("Error: CLR execution failed (HRESULT ") + hrbuf + ")";
+        std::string msg = "Error: ";
+        if (failedStep) msg += std::string(failedStep) + " failed";
+        else            msg += "CLR execution failed";
+        msg += " (HRESULT " + hrStr(HResult) + ")";
+        return msg;
     }
 
     return output.empty() ? "(no output)" : output;
