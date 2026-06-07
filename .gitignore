@@ -52,6 +52,8 @@ Pipfile.lock
 # Archivos de compilación / distribución
 # =========================
 build/
+!TeamServer/Models/Build/
+!TeamServer/Models/Build/*.py
 dist/
 wheels/
 *.whl
