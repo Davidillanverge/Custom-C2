@@ -1,19 +1,21 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Box, Typography, TextField, IconButton, Tooltip, Alert, Chip } from '@mui/material';
-import { ArrowBack, Send, Refresh } from '@mui/icons-material';
-import { agentAPI, Agent, Task, TaskResult } from '../services/api';
+import { Box, Typography, TextField, IconButton, Tooltip, Alert, Chip, Button } from '@mui/material';
+import { ArrowBack, Send, Refresh, Download as DownloadIcon } from '@mui/icons-material';
+import { agentAPI, Agent, Task, TaskResult, isFileResult, parseFileResult } from '../services/api';
 
 interface ConsoleEntry {
   key: number;
-  type: 'command' | 'output' | 'info' | 'error';
+  type: 'command' | 'output' | 'info' | 'error' | 'download';
   content: string;
   timestamp: Date;
+  taskId?: number;
+  filename?: string;
 }
 
 const PREDEFINED_CMDS = [
   'whoami', 'id', 'pwd', 'ls', 'hostname', 'ps', 'uname -a',
-  'ifconfig', 'netstat', 'cat /etc/passwd',
+  'ifconfig', 'netstat', 'cat /etc/passwd', 'download',
 ];
 
 const AgentDetail: React.FC = () => {
@@ -78,12 +80,24 @@ const AgentDetail: React.FC = () => {
         });
         const result = resultMap.get(task.id);
         if (result !== undefined) {
-          initial.push({
-            key: nextKey(),
-            type: 'output',
-            content: result,
-            timestamp: new Date(),
-          });
+          if (isFileResult(result)) {
+            const parsed = parseFileResult(result);
+            initial.push({
+              key: nextKey(),
+              type: 'download',
+              content: result,
+              timestamp: new Date(),
+              taskId: task.id,
+              filename: parsed?.filename,
+            });
+          } else {
+            initial.push({
+              key: nextKey(),
+              type: 'output',
+              content: result,
+              timestamp: new Date(),
+            });
+          }
         }
       }
 
@@ -108,12 +122,24 @@ const AgentDetail: React.FC = () => {
         for (const r of resultsData) {
           if (!seenResultIds.current.has(r.task_id)) {
             seenResultIds.current.add(r.task_id);
-            newEntries.push({
-              key: nextKey(),
-              type: 'output',
-              content: r.result,
-              timestamp: new Date(),
-            });
+            if (isFileResult(r.result)) {
+              const parsed = parseFileResult(r.result);
+              newEntries.push({
+                key: nextKey(),
+                type: 'download',
+                content: r.result,
+                timestamp: new Date(),
+                taskId: r.task_id,
+                filename: parsed?.filename,
+              });
+            } else {
+              newEntries.push({
+                key: nextKey(),
+                type: 'output',
+                content: r.result,
+                timestamp: new Date(),
+              });
+            }
           }
         }
         if (newEntries.length > 0) {
@@ -279,6 +305,45 @@ const AgentDetail: React.FC = () => {
                 >
                   {entry.content}
                 </pre>
+              </Box>
+            );
+          }
+
+          if (entry.type === 'download') {
+            return (
+              <Box
+                key={entry.key}
+                sx={{
+                  pl: 2,
+                  mb: 1,
+                  borderLeft: '2px solid #2d2d2d',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
+                }}
+              >
+                <DownloadIcon sx={{ fontSize: 14, color: '#4e9af1' }} />
+                <Typography sx={{ fontSize: '12px', color: '#cccccc' }}>
+                  {entry.filename}
+                </Typography>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  href={agentAPI.downloadFileUrl(agentId, entry.taskId!)}
+                  download={entry.filename}
+                  sx={{
+                    fontSize: '10px',
+                    py: 0,
+                    px: 1,
+                    minWidth: 0,
+                    borderColor: '#4e9af1',
+                    color: '#4e9af1',
+                    textTransform: 'none',
+                    '&:hover': { borderColor: '#5ba8ff', color: '#5ba8ff' },
+                  }}
+                >
+                  Save
+                </Button>
               </Box>
             );
           }

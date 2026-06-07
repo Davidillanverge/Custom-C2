@@ -1,5 +1,6 @@
+import base64
 import random
-from flask import Blueprint, request
+from flask import Blueprint, request, Response
 from flask import current_app as app
 from Models.Agent.agent import Agent
 from Models.Agent.agent_metadata import AgentMetadata
@@ -255,6 +256,28 @@ def get_results(agent_id):
         results = agent.get_results()
         return {'results': [result.to_dict() for result in results]}, 200
     return {'error': 'Agent not found'}, 404
+
+@agent_bp.route('/<int:agent_id>/results/<int:task_id>/file', methods=['GET'])
+def download_file(agent_id, task_id):
+    agent = agent_service.get_agent(agent_id)
+    if not agent:
+        return {'error': 'Agent not found'}, 404
+    result = agent.get_result(task_id)
+    if not result:
+        return {'error': 'Task not found'}, 404
+    r = result.get_result()
+    if not r.startswith("FILE:"):
+        return {'error': 'Not a file result'}, 400
+    parts = r.split(":", 2)
+    if len(parts) != 3:
+        return {'error': 'Invalid file result'}, 400
+    filename = parts[1]
+    data = base64.b64decode(parts[2])
+    return Response(
+        data,
+        mimetype='application/octet-stream',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+    )
 
 @agent_bp.route('/<int:agent_id>/results/<int:task_id>', methods=['GET'])
 def get_result(agent_id, task_id):

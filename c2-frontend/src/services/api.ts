@@ -23,6 +23,16 @@ export interface TaskResult {
   result: string;
 }
 
+export function isFileResult(result: string): boolean {
+  return result.startsWith('FILE:');
+}
+
+export function parseFileResult(result: string): { filename: string } | null {
+  const parts = result.split(':', 3);
+  if (parts.length !== 3 || parts[0] !== 'FILE') return null;
+  return { filename: parts[1] };
+}
+
 export interface Listener {
   type: string;
   name: string;
@@ -75,6 +85,9 @@ export const agentAPI = {
 
   getResult: (agentId: number, taskId: number) =>
     api.get(`/agents/${agentId}/results/${taskId}`).then(res => res.data),
+
+  downloadFileUrl: (agentId: number, taskId: number): string =>
+    `http://localhost:8000/agents/${agentId}/results/${taskId}/file`,
 };
 
 export const listenerAPI = {

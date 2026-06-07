@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include "Helpers.h"
+#include "Download.h"
 
 std::string whoami(std::vector<std::string> arguments);
 std::string shell(std::vector<std::string> arguments);
