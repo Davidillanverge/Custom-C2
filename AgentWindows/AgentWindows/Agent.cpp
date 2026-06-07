@@ -6,7 +6,9 @@
 #include <random>
 #include <unordered_map>
 
-Agent::Agent(){
+Agent::Agent()
+	: BeaconIntervalMs(5000), BeaconJitterMs(1000)
+{
 	Commands = loadCommands();
 	Metadata = generateMetadata();
 }
@@ -87,6 +89,21 @@ void Agent::executeTask(Task& task) {
 	std::string command_output;
 	if (task.command == "upload") {
 		command_output = Upload(task.arguments, task.file);
+	}
+	else if (task.command == "set_sleep") {
+		if (task.arguments.size() < 2) {
+			command_output = "Error: usage: set_sleep <interval_ms> <jitter_ms>";
+		} else {
+			try {
+				DWORD interval = static_cast<DWORD>(std::stoul(task.arguments[0]));
+				DWORD jitter   = static_cast<DWORD>(std::stoul(task.arguments[1]));
+				setBeaconIntervalMs(interval);
+				setBeaconJitterMs(jitter);
+				command_output = "Sleep set to " + std::to_string(interval) + " ms +/- " + std::to_string(jitter) + " ms";
+			} catch (...) {
+				command_output = "Error: interval and jitter must be positive integers";
+			}
+		}
 	}
 	else if (Agent::Commands.find(task.command) != Agent::Commands.end()) {
 		command_output = Commands[task.command](task.arguments);

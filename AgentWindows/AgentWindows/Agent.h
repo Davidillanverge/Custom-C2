@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <atomic>
 #include <queue>
 #include <unordered_map>
 #include "Helpers.h"
@@ -36,6 +37,8 @@ private:
 	std::queue<Task> Tasks;
 	std::queue<TaskResult> Results;
 	std::unordered_map<std::string, std::string(*)(std::vector<std::string> arguments)> Commands;
+	std::atomic<DWORD> BeaconIntervalMs;
+	std::atomic<DWORD> BeaconJitterMs;
 
 public:
 	Agent();
@@ -55,6 +58,11 @@ public:
 	TaskResult getNextResult();
 
 	std::vector<TaskResult> getTaskResults();
+
+	DWORD getBeaconIntervalMs() const { return BeaconIntervalMs.load(); }
+	DWORD getBeaconJitterMs()   const { return BeaconJitterMs.load(); }
+	void  setBeaconIntervalMs(DWORD ms) { BeaconIntervalMs.store(ms); }
+	void  setBeaconJitterMs(DWORD ms)   { BeaconJitterMs.store(ms); }
 
 	void executeTask(Task& task);
 

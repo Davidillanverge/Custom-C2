@@ -16,7 +16,7 @@ interface ConsoleEntry {
 const PREDEFINED_CMDS = [
   'whoami', 'id', 'pwd', 'ls', 'hostname', 'ps', 'uname -a',
   'ifconfig', 'netstat', 'cat /etc/passwd', 'download', 'upload',
-  'make_token', 'steal_token', 'rev2self',
+  'make_token', 'steal_token', 'rev2self', 'set_sleep',
 ];
 
 const AgentDetail: React.FC = () => {
@@ -34,6 +34,7 @@ const AgentDetail: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [makeTokenFields, setMakeTokenFields] = useState({ username: '', domain: '', password: '' });
+  const [sleepFields, setSleepFields] = useState({ interval: '5000', jitter: '1000' });
 
   const consoleEndRef = useRef<HTMLDivElement>(null);
   const seenResultIds = useRef<Set<number>>(new Set());
@@ -175,9 +176,11 @@ const AgentDetail: React.FC = () => {
     let taskArguments: string[];
 
     if (cmd === 'make_token') {
-      // Mask password in the console log
       displayCmd = `make_token ${makeTokenFields.username} ${makeTokenFields.domain || '.'} ***`;
       taskArguments = [makeTokenFields.username, makeTokenFields.domain || '.', makeTokenFields.password];
+    } else if (cmd === 'set_sleep') {
+      displayCmd = `set_sleep ${sleepFields.interval} ${sleepFields.jitter}`;
+      taskArguments = [sleepFields.interval, sleepFields.jitter];
     } else {
       displayCmd = args.trim() ? `${cmd} ${args.trim()}` : cmd;
       taskArguments = args.trim() ? args.trim().split(/\s+/) : [];
@@ -188,6 +191,7 @@ const AgentDetail: React.FC = () => {
     setArgs('');
     setSelectedFile(null);
     setMakeTokenFields({ username: '', domain: '', password: '' });
+    setSleepFields({ interval: '5000', jitter: '1000' });
 
     try {
       await agentAPI.sendTask(agentId, {
@@ -204,6 +208,7 @@ const AgentDetail: React.FC = () => {
     setCommand(value);
     if (value !== 'upload') setSelectedFile(null);
     if (value !== 'make_token') setMakeTokenFields({ username: '', domain: '', password: '' });
+    if (value !== 'set_sleep') setSleepFields({ interval: '5000', jitter: '1000' });
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -481,7 +486,36 @@ const AgentDetail: React.FC = () => {
             '& input': { color: '#ffffff', padding: '3px 8px', fontSize: '12px' },
           }}
         />
-        {command.trim() === 'make_token' ? (
+        {command.trim() === 'set_sleep' ? (
+          <>
+            {([
+              { key: 'interval', label: 'interval (ms)' },
+              { key: 'jitter',   label: 'jitter (ms)'   },
+            ] as const).map(({ key, label }) => (
+              <TextField
+                key={key}
+                value={sleepFields[key]}
+                onChange={(e) => setSleepFields((prev) => ({ ...prev, [key]: e.target.value }))}
+                onKeyDown={handleKeyDown}
+                placeholder={label}
+                type="number"
+                variant="outlined"
+                size="small"
+                inputProps={{ min: 0 }}
+                sx={{
+                  flex: 1,
+                  '& .MuiOutlinedInput-root': {
+                    backgroundColor: '#0c0c0c',
+                    '& fieldset': { borderColor: '#3c3c3c' },
+                    '&:hover fieldset': { borderColor: '#555' },
+                    '&.Mui-focused fieldset': { borderColor: '#4e9af1' },
+                  },
+                  '& input': { color: '#ffffff', padding: '3px 8px', fontSize: '12px' },
+                }}
+              />
+            ))}
+          </>
+        ) : command.trim() === 'make_token' ? (
           <>
             {(['username', 'domain', 'password'] as const).map((field) => (
               <TextField

@@ -16,9 +16,11 @@ HTTPCommunicationModule::~HTTPCommunicationModule() {
 }
 
 DWORD HTTPCommunicationModule::nextSleepMs() {
+	DWORD interval = agent.getBeaconIntervalMs();
+	DWORD jitter   = agent.getBeaconJitterMs();
 	std::uniform_int_distribution<DWORD> dist(
-		BEACON_INTERVAL_MS - BEACON_JITTER_MS,
-		BEACON_INTERVAL_MS + BEACON_JITTER_MS
+		interval > jitter ? interval - jitter : 0,
+		interval + jitter
 	);
 	return dist(rng);
 }

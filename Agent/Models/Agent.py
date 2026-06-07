@@ -17,6 +17,8 @@ class Agent:
         self.tasks: Queue[Task] = Queue()
         self.results: Queue[TaskResult] = Queue()
         self.commands: List[Command] = self.initialize_all_commands()
+        self.sleep_interval: float = 5.0   # seconds
+        self.jitter: float = 1.0           # ± seconds
 
     def initialize_all_commands(self):
         commands = []
@@ -55,7 +57,20 @@ class Agent:
         return None
     
     def execute_task(self, task: Task):
-        # Simulate task execution
+        if task.command == "set_sleep":
+            args = task.get_arguments()
+            if len(args) < 2:
+                result_str = "Error: usage: set_sleep <interval_ms> <jitter_ms>"
+            else:
+                try:
+                    self.sleep_interval = int(args[0]) / 1000.0
+                    self.jitter         = int(args[1]) / 1000.0
+                    result_str = f"Sleep set to {int(args[0])} ms +/- {int(args[1])} ms"
+                except ValueError:
+                    result_str = "Error: interval and jitter must be positive integers"
+            self.add_result(TaskResult(task_id=task.id, result=result_str))
+            return
+
         command = self.get_command(task.command)
         if command:
             result_str = command.execute(task)
