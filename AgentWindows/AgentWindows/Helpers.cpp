@@ -132,13 +132,25 @@ std::string base64_decode(const std::string& input) {
 
 std::string json_escape(const std::string& s) {
     std::string out;
-    for (char c : s) {
+    out.reserve(s.size());
+    for (unsigned char c : s) {
         switch (c) {
-        case '\"': out += "\\\""; break;
+        case '"':  out += "\\\""; break;
         case '\\': out += "\\\\"; break;
-        case '\r': break; // opcional: ignorar \r
-        case '\n': out += "\\n"; break;
-        default: out += c;
+        case '\b': out += "\\b";  break;
+        case '\f': out += "\\f";  break;
+        case '\n': out += "\\n";  break;
+        case '\r': out += "\\r";  break;
+        case '\t': out += "\\t";  break;
+        default:
+            if (c < 0x20 || c == 0x00) {
+                // Escape all other control characters as \uXXXX
+                char buf[8];
+                sprintf_s(buf, "\\u%04X", (unsigned)c);
+                out += buf;
+            } else {
+                out += (char)c;
+            }
         }
     }
     return out;
