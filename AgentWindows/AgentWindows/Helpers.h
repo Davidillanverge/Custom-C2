@@ -52,6 +52,7 @@ std::vector<Task> json2arrayTasks(const std::string& json);
 std::wstring s2ws(const std::string& str);
 std::string arrayTaskResult2json(const std::vector<TaskResult>& results);
 std::string base64_encode(const std::string& input);
+std::string base64_decode(const std::string& input);
 std::string readPipe(HANDLE hRead);
 std::string GetHostname();
 std::string GetProcessname();

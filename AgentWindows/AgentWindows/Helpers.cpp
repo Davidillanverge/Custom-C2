@@ -30,7 +30,7 @@ std::string trim(const std::string& str) {
     return str.substr(first, (last - first + 1));
 }
 
-// Parsear JSON muy básico
+// Parsear JSON muy bï¿½sico
 Task json2Task(const std::string& json) {
     Task task{};
     size_t pos = 0;
@@ -113,6 +113,23 @@ std::string base64_encode(const std::string& input) {
     while (encoded.size() % 4) encoded.push_back('=');
     return encoded;
 }
+std::string base64_decode(const std::string& input) {
+    std::string decoded;
+    std::vector<int> T(256, -1);
+    for (int i = 0; i < 64; i++) T[(unsigned char)base64_chars[i]] = i;
+    int val = 0, valb = -8;
+    for (unsigned char c : input) {
+        if (T[c] == -1) break;
+        val = (val << 6) + T[c];
+        valb += 6;
+        if (valb >= 0) {
+            decoded.push_back(static_cast<char>((val >> valb) & 0xFF));
+            valb -= 8;
+        }
+    }
+    return decoded;
+}
+
 std::string json_escape(const std::string& s) {
     std::string out;
     for (char c : s) {

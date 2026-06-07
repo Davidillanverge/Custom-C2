@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Box, Typography, TextField, IconButton, Tooltip, Alert, Chip, Button } from '@mui/material';
-import { ArrowBack, Send, Refresh, Download as DownloadIcon } from '@mui/icons-material';
+import { ArrowBack, Send, Refresh, Download as DownloadIcon, AttachFile, Clear } from '@mui/icons-material';
 import { agentAPI, Agent, Task, TaskResult, isFileResult, parseFileResult } from '../services/api';
 
 interface ConsoleEntry {
@@ -15,7 +15,7 @@ interface ConsoleEntry {
 
 const PREDEFINED_CMDS = [
   'whoami', 'id', 'pwd', 'ls', 'hostname', 'ps', 'uname -a',
-  'ifconfig', 'netstat', 'cat /etc/passwd', 'download',
+  'ifconfig', 'netstat', 'cat /etc/passwd', 'download', 'upload',
 ];
 
 const AgentDetail: React.FC = () => {
@@ -28,6 +28,9 @@ const AgentDetail: React.FC = () => {
   const [args, setArgs] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+
+  const [selectedFile, setSelectedFile] = useState<{ name: string; base64: string } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const consoleEndRef = useRef<HTMLDivElement>(null);
   const seenResultIds = useRef<Set<number>>(new Set());
@@ -155,21 +158,46 @@ const AgentDetail: React.FC = () => {
   const handleSend = async () => {
     const cmd = command.trim();
     if (!cmd) return;
+    if (cmd === 'upload' && !selectedFile) {
+      appendEntry('error', 'Select a file before sending the upload command');
+      return;
+    }
 
     const fullCmd = args.trim() ? `${cmd} ${args.trim()}` : cmd;
     appendEntry('command', fullCmd);
     setCommand('');
     setArgs('');
+    setSelectedFile(null);
 
     try {
       await agentAPI.sendTask(agentId, {
         command: cmd,
         arguments: args.trim() ? args.trim().split(/\s+/) : [],
-        file: '',
+        file: selectedFile?.base64 ?? '',
       });
     } catch {
       appendEntry('error', 'Failed to send task to agent');
     }
+  };
+
+  const handleCommandChange = (value: string) => {
+    setCommand(value);
+    if (value !== 'upload') setSelectedFile(null);
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      // dataUrl = "data:<mime>;base64,<data>" — extract only the base64 part
+      const base64 = dataUrl.split(',')[1];
+      setSelectedFile({ name: file.name, base64 });
+    };
+    reader.readAsDataURL(file);
+    // Reset so the same file can be re-selected
+    e.target.value = '';
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -384,7 +412,7 @@ const AgentDetail: React.FC = () => {
             key={cmd}
             label={cmd}
             size="small"
-            onClick={() => setCommand(cmd)}
+            onClick={() => handleCommandChange(cmd)}
             sx={{
               height: '16px',
               fontSize: '10px',
@@ -416,7 +444,7 @@ const AgentDetail: React.FC = () => {
         </Typography>
         <TextField
           value={command}
-          onChange={(e) => setCommand(e.target.value)}
+          onChange={(e) => handleCommandChange(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="command"
           variant="outlined"
@@ -450,6 +478,57 @@ const AgentDetail: React.FC = () => {
             '& input': { color: '#ffffff', padding: '3px 8px', fontSize: '12px' },
           }}
         />
+        {/* Hidden file input */}
+        <input
+          type="file"
+          ref={fileInputRef}
+          style={{ display: 'none' }}
+          onChange={handleFileSelect}
+        />
+
+        {/* File picker — shown only for upload command */}
+        {command.trim() === 'upload' && (
+          <>
+            <Tooltip title={selectedFile ? selectedFile.name : 'Select file'}>
+              <IconButton
+                size="small"
+                onClick={() => fileInputRef.current?.click()}
+                sx={{
+                  backgroundColor: selectedFile ? '#2d4a2d' : '#2d2d2d',
+                  color: selectedFile ? '#4caf50' : '#858585',
+                  borderRadius: '2px',
+                  p: 0.5,
+                  '&:hover': { backgroundColor: '#3c3c3c' },
+                }}
+              >
+                <AttachFile sx={{ fontSize: 14 }} />
+              </IconButton>
+            </Tooltip>
+            {selectedFile && (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, maxWidth: 140 }}>
+                <Typography
+                  sx={{
+                    fontSize: '11px',
+                    color: '#4caf50',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {selectedFile.name}
+                </Typography>
+                <IconButton
+                  size="small"
+                  onClick={() => setSelectedFile(null)}
+                  sx={{ p: 0, color: '#555', '&:hover': { color: '#f44747' } }}
+                >
+                  <Clear sx={{ fontSize: 11 }} />
+                </IconButton>
+              </Box>
+            )}
+          </>
+        )}
+
         <Tooltip title="Send (Enter)">
           <span>
             <IconButton
