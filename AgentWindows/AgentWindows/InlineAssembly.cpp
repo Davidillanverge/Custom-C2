@@ -142,7 +142,21 @@ std::string InlineAssembly(std::vector<std::string> arguments, const std::string
         SafeArrayUnaccessData(SafeAssembly);
     }
 
-    CLR_STEP(AppDomain->Load_3(SafeAssembly, &Assembly), "AppDomain::Load_3")
+    // Load_3 returns 0x8007000B (ERROR_BAD_FORMAT / BadImageFormatException) when
+    // the assembly targets .NET Core / .NET 5+ instead of .NET Framework 4.x.
+    // The agent uses the .NET Framework CLR (v4.0.30319) and cannot load assemblies
+    // compiled for a different runtime. Compile the target assembly with:
+    //   <TargetFramework>net48</TargetFramework>   (in .csproj)
+    // or via csc:  csc /target:exe Hello.cs  (defaults to .NET Framework on Windows)
+    if (FAILED(HResult = AppDomain->Load_3(SafeAssembly, &Assembly))) {
+        if (HResult == HRESULT_FROM_WIN32(ERROR_BAD_FORMAT)) {
+            return "Error: AppDomain::Load_3 failed (0x8007000B) — "
+                   "assembly must target .NET Framework 4.x, not .NET Core / .NET 5+. "
+                   "Set <TargetFramework>net48</TargetFramework> in the .csproj and recompile.";
+        }
+        failedStep = "AppDomain::Load_3";
+        goto _CLEANUP;
+    }
 
     // ── Entry point ──────────────────────────────────────────────────────────
     CLR_STEP(Assembly->get_EntryPoint(&MethodInfo), "Assembly::get_EntryPoint")
