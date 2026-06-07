@@ -4,3 +4,4 @@
 #include <vector>
 
 std::string MakeToken(std::vector<std::string> arguments);
+void        ClearImpersonationToken();

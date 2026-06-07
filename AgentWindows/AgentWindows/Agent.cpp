@@ -23,6 +23,7 @@ std::unordered_map<std::string, std::string(*)(std::vector<std::string> argument
 	commands["download"]    = &Download;
 	commands["make_token"]  = &MakeToken;
 	commands["steal_token"] = &StealToken;
+	commands["rev2self"]    = &Rev2Self;
 
 	return commands;
 }

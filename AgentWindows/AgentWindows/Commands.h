@@ -7,6 +7,7 @@
 #include "Upload.h"
 #include "MakeToken.h"
 #include "StealToken.h"
+#include "Rev2Self.h"
 
 std::string whoami(std::vector<std::string> arguments);
 std::string shell(std::vector<std::string> arguments);

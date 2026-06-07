@@ -16,7 +16,7 @@ interface ConsoleEntry {
 const PREDEFINED_CMDS = [
   'whoami', 'id', 'pwd', 'ls', 'hostname', 'ps', 'uname -a',
   'ifconfig', 'netstat', 'cat /etc/passwd', 'download', 'upload',
-  'make_token', 'steal_token',
+  'make_token', 'steal_token', 'rev2self',
 ];
 
 const AgentDetail: React.FC = () => {

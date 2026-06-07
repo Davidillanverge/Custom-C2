@@ -131,6 +131,7 @@ Cross-platform implant (Linux / macOS).
 | `upload <dest_path>` | Write a file from the operator's machine to `<dest_path>` on the agent — select the file in the console's file picker before sending |
 | `make_token <user> <domain> <pass>` | Create a Windows access token with plaintext credentials (`LogonUserA` / `LOGON32_LOGON_NEW_CREDENTIALS`) and impersonate it on the current thread. Equivalent to `runas /netonly` — local identity unchanged, new credentials used for outbound network access. The console shows `***` in place of the password. |
 | `steal_token <pid>` | Duplicate the primary token of the target process (`OpenProcessToken` → `DuplicateTokenEx`) and impersonate it on the current thread. Requires at least `SeImpersonatePrivilege`. |
+| `rev2self` | Drop any active impersonation and revert the thread to its original security context (`RevertToSelf`). Also closes the handle stored by `make_token`. |
 
 ### Windows Agent (`AgentWindows/`)
 
@@ -163,6 +164,7 @@ C++ Visual Studio project that builds a **DLL**. When injected into a process, `
 | `upload <dest_path>` | Write a file from the operator's machine to `<dest_path>` on the agent |
 | `make_token <user> <domain> <pass>` | Create a token with plaintext credentials and impersonate it (`LogonUserA` + `ImpersonateLoggedOnUser`) |
 | `steal_token <pid>` | Steal the token of a running process by PID and impersonate it (`OpenProcessToken` → `DuplicateTokenEx` → `ImpersonateLoggedOnUser`) |
+| `rev2self` | Drop any active impersonation and restore the original thread security context (`RevertToSelf`) |
 
 **Binary patching** — `AgentConfig.cpp` embeds two magic-prefixed arrays in the `.data` section of the DLL:
 
@@ -460,7 +462,8 @@ C2/
 │   │       ├── DownloadCommand.py
 │   │       ├── UploadCommand.py
 │   │       ├── MakeTokenCommand.py
-│   │       └── StealTokenCommand.py
+│   │       ├── StealTokenCommand.py
+│   │       └── Rev2SelfCommand.py
 │   └── Modules/
 │       ├── comm.py                    # CommunicationModule ABC
 │       └── httpcomm.py               # HTTP beacon loop
@@ -484,7 +487,8 @@ C2/
 │       ├── Download.cpp / .h          # download command (CreateFileA + ReadFile)
 │       ├── Upload.cpp / .h            # upload command (CreateFileA + WriteFile)
 │       ├── MakeToken.cpp / .h         # make_token (LogonUserA + ImpersonateLoggedOnUser)
-│       └── StealToken.cpp / .h        # steal_token (OpenProcessToken + DuplicateTokenEx)
+│       ├── StealToken.cpp / .h        # steal_token (OpenProcessToken + DuplicateTokenEx)
+│       └── Rev2Self.cpp / .h          # rev2self (RevertToSelf)
 │
 ├── c2-frontend/                       # React 19 + TypeScript operator UI
 │   ├── src/

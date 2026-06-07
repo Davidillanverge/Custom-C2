@@ -1,8 +1,14 @@
 #include "MakeToken.h"
 #include <sstream>
 
-// Persists across calls so the token can be reverted later (rev2self).
 static HANDLE g_hImpersonationToken = NULL;
+
+void ClearImpersonationToken() {
+    if (g_hImpersonationToken != NULL) {
+        CloseHandle(g_hImpersonationToken);
+        g_hImpersonationToken = NULL;
+    }
+}
 
 std::string MakeToken(std::vector<std::string> arguments) {
     if (arguments.size() < 3)
