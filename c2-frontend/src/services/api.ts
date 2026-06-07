@@ -44,9 +44,11 @@ export type BuildArch   = 'x64' | 'x86' | 'ARM64';
 export type BuildStatus = 'pending' | 'running' | 'success' | 'failed';
 
 export interface BuildRequest {
-  host: string;
-  port: number;
-  arch: BuildArch;
+  host:      string;
+  port:      number;
+  arch:      BuildArch;
+  sleep_ms:  number;
+  jitter_ms: number;
 }
 
 export interface Build {
@@ -54,6 +56,8 @@ export interface Build {
   host:        string;
   port:        number;
   arch:        BuildArch;
+  sleep_ms:    number;
+  jitter_ms:   number;
   status:      BuildStatus;
   created_at:  string;
   finished_at: string | null;

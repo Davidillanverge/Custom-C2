@@ -49,7 +49,7 @@ const Builder: React.FC = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [logOpen, setLogOpen]       = useState(false);
   const [activeLog, setActiveLog]   = useState('');
-  const [form, setForm]             = useState<BuildRequest>({ host: '', port: 8080, arch: 'x64' });
+  const [form, setForm]             = useState<BuildRequest>({ host: '', port: 8080, arch: 'x64', sleep_ms: 5000, jitter_ms: 1000 });
   const [submitting, setSubmitting] = useState(false);
   const [snackbar, setSnackbar]     = useState<{
     open: boolean; message: string; severity: 'success' | 'error';
@@ -79,7 +79,7 @@ const Builder: React.FC = () => {
     try {
       await builderAPI.createBuild(form);
       setDialogOpen(false);
-      setForm({ host: '', port: 8080, arch: 'x64' });
+      setForm({ host: '', port: 8080, arch: 'x64', sleep_ms: 5000, jitter_ms: 1000 });
       setSnackbar({ open: true, message: 'Build completed', severity: 'success' });
       await loadBuilds();
     } catch {
@@ -109,7 +109,11 @@ const Builder: React.FC = () => {
 
   // The selected arch's base DLL must be available
   const selectedArchAvailable = check?.archs[form.arch] ?? false;
-  const formValid = form.host.trim() !== '' && form.port >= 1 && form.port <= 65535 && selectedArchAvailable;
+  const formValid = form.host.trim() !== ''
+    && form.port >= 1 && form.port <= 65535
+    && form.sleep_ms >= 100
+    && form.jitter_ms >= 0 && form.jitter_ms < form.sleep_ms
+    && selectedArchAvailable;
 
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -189,6 +193,8 @@ const Builder: React.FC = () => {
               <TableCell>Host</TableCell>
               <TableCell>Port</TableCell>
               <TableCell>Arch</TableCell>
+              <TableCell>Sleep</TableCell>
+              <TableCell>Jitter</TableCell>
               <TableCell>Built at</TableCell>
               <TableCell sx={{ width: 72 }}>Actions</TableCell>
             </TableRow>
@@ -196,13 +202,13 @@ const Builder: React.FC = () => {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={6} sx={{ textAlign: 'center', color: '#555', cursor: 'default' }}>
+                <TableCell colSpan={8} sx={{ textAlign: 'center', color: '#555', cursor: 'default' }}>
                   Loading...
                 </TableCell>
               </TableRow>
             ) : builds.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} sx={{ textAlign: 'center', color: '#555', py: 4, cursor: 'default' }}>
+                <TableCell colSpan={8} sx={{ textAlign: 'center', color: '#555', py: 4, cursor: 'default' }}>
                   No builds yet. Click "New Build" to patch and download an agent.
                 </TableCell>
               </TableRow>
@@ -229,6 +235,8 @@ const Builder: React.FC = () => {
                   </TableCell>
                   <TableCell>{build.port}</TableCell>
                   <TableCell sx={{ color: '#9cdcfe' }}>{build.arch}</TableCell>
+                  <TableCell sx={{ color: '#858585', fontSize: '11px' }}>{build.sleep_ms} ms</TableCell>
+                  <TableCell sx={{ color: '#858585', fontSize: '11px' }}>±{build.jitter_ms} ms</TableCell>
                   <TableCell sx={{ color: '#858585', fontSize: '11px' }}>
                     {build.finished_at
                       ? new Date(build.finished_at).toLocaleString()
@@ -291,6 +299,26 @@ const Builder: React.FC = () => {
             inputProps={{ min: 1, max: 65535 }}
             sx={{ mb: 2 }}
           />
+          <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+            <TextField
+              fullWidth
+              label="Sleep (ms)"
+              type="number"
+              value={form.sleep_ms}
+              onChange={e => setForm({ ...form, sleep_ms: parseInt(e.target.value) || 0 })}
+              inputProps={{ min: 100 }}
+              helperText="Beacon interval (min 100 ms)"
+            />
+            <TextField
+              fullWidth
+              label="Jitter (ms)"
+              type="number"
+              value={form.jitter_ms}
+              onChange={e => setForm({ ...form, jitter_ms: parseInt(e.target.value) || 0 })}
+              inputProps={{ min: 0 }}
+              helperText="± random offset (< sleep)"
+            />
+          </Box>
           <FormControl fullWidth>
             <InputLabel>Architecture</InputLabel>
             <Select

