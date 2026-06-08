@@ -182,11 +182,18 @@
   <ItemGroup>
     <ClCompile Include="Agent.cpp" />
     <ClCompile Include="AgentConfig.cpp" />
+    <ClCompile Include="BOF.cpp" />
     <ClCompile Include="Cd.cpp" />
+    <ClCompile Include="Download.cpp" />
+    <ClCompile Include="InlineAssembly.cpp" />
     <ClCompile Include="Ls.cpp" />
+    <ClCompile Include="MakeToken.cpp" />
     <ClCompile Include="Pwd.cpp" />
+    <ClCompile Include="Rev2Self.cpp" />
     <ClCompile Include="Run.cpp" />
     <ClCompile Include="Shell.cpp" />
+    <ClCompile Include="StealToken.cpp" />
+    <ClCompile Include="Upload.cpp" />
     <ClCompile Include="Whoami.cpp" />
     <ClCompile Include="Helpers.cpp" />
     <ClCompile Include="HttpClient.cpp" />
@@ -200,6 +207,7 @@
     <ClInclude Include="Helpers.h" />
     <ClInclude Include="HttpClient.h" />
     <ClInclude Include="HTTPCommunicationModule.h" />
+    <ClInclude Include="mscorlib.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
