@@ -182,28 +182,34 @@ static ULONG ObjectVirtualSize(POBJECT_CTX ObjCtx) {
 }
 
 // ── Relocation fixup ──────────────────────────────────────────────────────────
-static VOID ObjectRelocation(ULONG Type, PVOID Reloc, PVOID SecBase) {
-    switch (Type) {
-    // AMD64 relocations
-    case IMAGE_REL_AMD64_REL32:
-        *(PUINT32)Reloc += (ULONG)((ULONG_PTR)SecBase - (ULONG_PTR)Reloc - 4); break;
-    case IMAGE_REL_AMD64_REL32_1:
-        *(PUINT32)Reloc += (ULONG)((ULONG_PTR)SecBase - (ULONG_PTR)Reloc - 5); break;
-    case IMAGE_REL_AMD64_REL32_2:
-        *(PUINT32)Reloc += (ULONG)((ULONG_PTR)SecBase - (ULONG_PTR)Reloc - 6); break;
-    case IMAGE_REL_AMD64_REL32_3:
-        *(PUINT32)Reloc += (ULONG)((ULONG_PTR)SecBase - (ULONG_PTR)Reloc - 7); break;
-    case IMAGE_REL_AMD64_REL32_4:
-        *(PUINT32)Reloc += (ULONG)((ULONG_PTR)SecBase - (ULONG_PTR)Reloc - 8); break;
-    case IMAGE_REL_AMD64_REL32_5:
-        *(PUINT32)Reloc += (ULONG)((ULONG_PTR)SecBase - (ULONG_PTR)Reloc - 9); break;
-    case IMAGE_REL_AMD64_ADDR64:
-        *(PUINT64)Reloc += (ULONG64)SecBase; break;
-    // x86 (i386) relocations
-    case IMAGE_REL_I386_DIR32:
-        *(PUINT32)Reloc += (UINT32)(ULONG_PTR)SecBase; break;
-    case IMAGE_REL_I386_REL32:
-        *(PUINT32)Reloc += (UINT32)((ULONG_PTR)SecBase - (ULONG_PTR)Reloc - 4); break;
+// Machine is IMAGE_FILE_MACHINE_AMD64 or IMAGE_FILE_MACHINE_I386; kept separate
+// because I386 and AMD64 relocation type constants share numeric values (e.g. both
+// IMAGE_REL_AMD64_REL32_2 and IMAGE_REL_I386_DIR32 equal 6).
+static VOID ObjectRelocation(WORD Machine, ULONG Type, PVOID Reloc, PVOID SecBase) {
+    if (Machine == IMAGE_FILE_MACHINE_I386) {
+        switch (Type) {
+        case IMAGE_REL_I386_DIR32:
+            *(PUINT32)Reloc += (UINT32)(ULONG_PTR)SecBase; break;
+        case IMAGE_REL_I386_REL32:
+            *(PUINT32)Reloc += (UINT32)((ULONG_PTR)SecBase - (ULONG_PTR)Reloc - 4); break;
+        }
+    } else {
+        switch (Type) {
+        case IMAGE_REL_AMD64_REL32:
+            *(PUINT32)Reloc += (ULONG)((ULONG_PTR)SecBase - (ULONG_PTR)Reloc - 4); break;
+        case IMAGE_REL_AMD64_REL32_1:
+            *(PUINT32)Reloc += (ULONG)((ULONG_PTR)SecBase - (ULONG_PTR)Reloc - 5); break;
+        case IMAGE_REL_AMD64_REL32_2:
+            *(PUINT32)Reloc += (ULONG)((ULONG_PTR)SecBase - (ULONG_PTR)Reloc - 6); break;
+        case IMAGE_REL_AMD64_REL32_3:
+            *(PUINT32)Reloc += (ULONG)((ULONG_PTR)SecBase - (ULONG_PTR)Reloc - 7); break;
+        case IMAGE_REL_AMD64_REL32_4:
+            *(PUINT32)Reloc += (ULONG)((ULONG_PTR)SecBase - (ULONG_PTR)Reloc - 8); break;
+        case IMAGE_REL_AMD64_REL32_5:
+            *(PUINT32)Reloc += (ULONG)((ULONG_PTR)SecBase - (ULONG_PTR)Reloc - 9); break;
+        case IMAGE_REL_AMD64_ADDR64:
+            *(PUINT64)Reloc += (ULONG64)SecBase; break;
+        }
     }
 }
 
@@ -238,7 +244,7 @@ static BOOL ObjectProcessSection(POBJECT_CTX ObjCtx) {
                 FnIndex++;
             } else {
                 PVOID SecBase = (PVOID)((ULONG_PTR)ObjCtx->SecMap[ObjSym->SectionNumber - 1].Base + ObjSym->Value);
-                ObjectRelocation(ObjRel->Type, Reloc, SecBase);
+                ObjectRelocation(ObjCtx->Header->Machine, ObjRel->Type, Reloc, SecBase);
             }
 
             ObjRel = (PIMAGE_RELOCATION)((ULONG_PTR)ObjRel + sizeof(IMAGE_RELOCATION));
@@ -406,7 +412,7 @@ std::string RunBOF(std::vector<std::string> arguments, const std::string& file_d
     PBYTE pArgs = packedArgs.empty() ? nullptr : packedArgs.data();
     ULONG uArgc = (ULONG)packedArgs.size();
 
-    BOOL ok = ObjectLdr(assembly.data(), (PSTR)"go", pArgs, uArgc);
+    BOOL ok = ObjectLdr((PVOID)assembly.data(), (PSTR)"go", pArgs, uArgc);
 
     tls_bofOut = nullptr;
 
