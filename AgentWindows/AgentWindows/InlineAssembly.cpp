@@ -1,6 +1,7 @@
 #include "Commands.h"
 #include <metahost.h>
 #include <string>
+#include <thread>
 #include <vector>
 #include <sstream>
 
@@ -41,6 +42,9 @@ HRESULT DotnetExecute(
     HANDLE                 IoPipeRead        = nullptr;
     HANDLE                 IoPipeWrite       = nullptr;
     SECURITY_ATTRIBUTES    SecurityAttr      = {};
+    // Declared before any goto so destructors run on every exit path.
+    std::string            pipeOutput;
+    std::thread            pipeReader;
 
     *OutputBuffer = nullptr;
     *OutputLength = 0;
@@ -108,6 +112,8 @@ HRESULT DotnetExecute(
         HResult = HRESULT_FROM_WIN32(GetLastError());
         goto _END_OF_FUNC;
     }
+    // Read end must not be inherited by child processes; only write end goes to the assembly.
+    SetHandleInformation(IoPipeRead, HANDLE_FLAG_INHERIT, 0);
 
     if (!(ConExist = GetConsoleWindow())) {
         AllocConsole();
@@ -117,12 +123,20 @@ HRESULT DotnetExecute(
     BackupHandle = GetStdHandle(STD_OUTPUT_HANDLE);
     SetStdHandle(STD_OUTPUT_HANDLE, IoPipeWrite);
 
+    // Drain the pipe concurrently with Invoke_3.  If we drained AFTER Invoke_3
+    // the pipe buffer (~4–64 KB) could fill while the assembly is still running,
+    // causing the assembly to block on write while we block on Invoke_3 — deadlock.
+    pipeReader = std::thread([&]() {
+        pipeOutput = readPipe(IoPipeRead);
+    });
+
     {
         VARIANT vtRet = {};
         MethodInfo->Invoke_3(vtRet, SafeArguments, nullptr);
     }
 
-    // Restore stdout before reading so ReadFile sees EOF after CloseHandle.
+    // Restore stdout first, then close the write end so the reader thread sees
+    // EOF and readPipe() returns.  Join before touching pipeOutput.
     if (BackupHandle) {
         SetStdHandle(STD_OUTPUT_HANDLE, BackupHandle);
         BackupHandle = nullptr;
@@ -131,30 +145,29 @@ HRESULT DotnetExecute(
         CloseHandle(IoPipeWrite);
         IoPipeWrite = nullptr;
     }
+    pipeReader.join();
 
-    // Read all output using the loop helper — avoids the 64 KB single-read limit.
-    {
-        std::string pipeOutput = readPipe(IoPipeRead);
-        CloseHandle(IoPipeRead);
-        IoPipeRead = nullptr;
+    CloseHandle(IoPipeRead);
+    IoPipeRead = nullptr;
 
-        *OutputLength = (ULONG)pipeOutput.size();
-        if (!pipeOutput.empty()) {
-            *OutputBuffer = static_cast<LPSTR>(
-                HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, pipeOutput.size() + 1));
-            if (*OutputBuffer) {
-                memcpy(*OutputBuffer, pipeOutput.data(), pipeOutput.size());
-            } else {
-                HResult = E_OUTOFMEMORY;
-                *OutputLength = 0;
-            }
+    *OutputLength = (ULONG)pipeOutput.size();
+    if (!pipeOutput.empty()) {
+        *OutputBuffer = static_cast<LPSTR>(
+            HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, pipeOutput.size() + 1));
+        if (*OutputBuffer) {
+            memcpy(*OutputBuffer, pipeOutput.data(), pipeOutput.size());
+        } else {
+            HResult = E_OUTOFMEMORY;
+            *OutputLength = 0;
         }
     }
 
 _END_OF_FUNC:
     if (BackupHandle) SetStdHandle(STD_OUTPUT_HANDLE, BackupHandle);
-    if (IoPipeWrite)  CloseHandle(IoPipeWrite);
-    if (IoPipeRead)   CloseHandle(IoPipeRead);
+    // Close write end before joining so the reader thread sees EOF and exits.
+    if (IoPipeWrite) { CloseHandle(IoPipeWrite); IoPipeWrite = nullptr; }
+    if (pipeReader.joinable()) pipeReader.join();
+    if (IoPipeRead)  CloseHandle(IoPipeRead);
 
     if (AssemblyArgv) LocalFree(AssemblyArgv);
 
