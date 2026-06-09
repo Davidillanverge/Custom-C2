@@ -82,6 +82,10 @@ class AgentService:
         )
 
     def pop_pending_tasks(self, agent: Agent) -> list[Task]:
+        # At-most-once delivery: tasks are removed from the DB before the beacon
+        # receives them.  If the beacon never ACKs (connection drops after this
+        # point), those tasks are silently lost.  This is an accepted trade-off
+        # for the current stateless beacon protocol.
         tasks = agent.get_pending_tasks()
         for t in tasks:
             self._db.delete_task(t.id)

@@ -5,7 +5,12 @@
 #include <sddl.h>
 
 std::wstring s2ws(const std::string& str) {
-    return std::wstring(str.begin(), str.end());
+    if (str.empty()) return {};
+    int size = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), (int)str.size(), nullptr, 0);
+    if (size <= 0) return {};
+    std::wstring result(size, 0);
+    MultiByteToWideChar(CP_UTF8, 0, str.c_str(), (int)str.size(), &result[0], size);
+    return result;
 }
 
 std::string arrayTaskResult2json(const std::vector<TaskResult>& results) {
@@ -51,17 +56,29 @@ Task json2Task(const std::string& json) {
         task.command = trim(json.substr(colon + 1, comma - colon - 1));
     }
 
-    // arguments
+    // arguments — parse quoted JSON strings so commas inside strings are not treated as delimiters
     pos = json.find("\"arguments\"");
     if (pos != std::string::npos) {
-        size_t openBracket = json.find("[", pos);
+        size_t openBracket  = json.find("[", pos);
         size_t closeBracket = json.find("]", openBracket);
-        std::string argsStr = json.substr(openBracket + 1, closeBracket - openBracket - 1);
-
-        std::stringstream ss(argsStr);
-        std::string arg;
-        while (std::getline(ss, arg, ',')) {
-            task.arguments.push_back(trim(arg));
+        if (openBracket != std::string::npos && closeBracket != std::string::npos) {
+            std::string argsStr = json.substr(openBracket + 1, closeBracket - openBracket - 1);
+            size_t i = 0;
+            while (i < argsStr.size()) {
+                if (argsStr[i] == '"') {
+                    size_t start = i + 1;
+                    size_t end   = start;
+                    while (end < argsStr.size()) {
+                        if (argsStr[end] == '\\') { end += 2; continue; } // skip escaped char
+                        if (argsStr[end] == '"')  { break; }
+                        ++end;
+                    }
+                    task.arguments.push_back(argsStr.substr(start, end - start));
+                    i = end + 1;
+                } else {
+                    ++i;
+                }
+            }
         }
     }
 
@@ -95,11 +112,28 @@ std::vector<Task> json2arrayTasks(const std::string& json) {
     while (true) {
         size_t start_pos = json.find("{", pos);
         if (start_pos == std::string::npos) break;
-        size_t end_pos = json.find("}", start_pos);
-        if (end_pos == std::string::npos) break;
-        std::string task_json = json.substr(start_pos, end_pos - start_pos + 1);
-        Task task = json2Task(task_json);
-        tasks.push_back(task);
+
+        // Walk forward tracking brace depth and string context so nested objects
+        // (e.g. inside string values) are handled correctly.
+        int    depth     = 1;
+        bool   in_string = false;
+        size_t i         = start_pos + 1;
+        while (i < json.size() && depth > 0) {
+            char c = json[i];
+            if (in_string) {
+                if (c == '\\')      { ++i; }           // skip escaped char
+                else if (c == '"')  { in_string = false; }
+            } else {
+                if      (c == '"')  { in_string = true; }
+                else if (c == '{')  { ++depth; }
+                else if (c == '}')  { --depth; }
+            }
+            ++i;
+        }
+        if (depth != 0) break;  // malformed JSON
+
+        size_t end_pos = i - 1;
+        tasks.push_back(json2Task(json.substr(start_pos, end_pos - start_pos + 1)));
         pos = end_pos + 1;
     }
     return tasks;
@@ -131,7 +165,8 @@ std::string base64_decode(const std::string& input) {
     for (int i = 0; i < 64; i++) T[(unsigned char)base64_chars[i]] = i;
     int val = 0, valb = -8;
     for (unsigned char c : input) {
-        if (T[c] == -1) break;
+        if (c == '=' || c == '\r' || c == '\n') continue; // skip padding/whitespace
+        if (T[c] == -1) continue;                          // skip unknown chars
         val = (val << 6) + T[c];
         valb += 6;
         if (valb >= 0) {

@@ -54,7 +54,10 @@ const Agents: React.FC = () => {
   const loadAgents = async () => {
     try {
       setLoading(true);
-      setAgents(await agentAPI.getAgents());
+      const data = await agentAPI.getAgents();
+      setAgents(data);
+      // Clamp current page to valid range if agent count shrank
+      setPage(p => Math.min(p, Math.max(0, Math.ceil(data.length / PAGE_SIZE) - 1)));
       setError('');
     } catch (e) {
       console.warn('Failed to load agents:', e);

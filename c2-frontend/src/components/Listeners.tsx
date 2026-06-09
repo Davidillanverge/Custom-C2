@@ -31,6 +31,7 @@ const Listeners: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [newListener, setNewListener] = useState({ name: '', type: 'http', port: 8080 });
   const [snackbar, setSnackbar] = useState<{
     open: boolean;
@@ -55,6 +56,7 @@ const Listeners: React.FC = () => {
   };
 
   const handleCreate = async () => {
+    setSubmitting(true);
     try {
       await listenerAPI.createListener(newListener);
       setSnackbar({ open: true, message: 'Listener created', severity: 'success' });
@@ -63,6 +65,8 @@ const Listeners: React.FC = () => {
       loadListeners();
     } catch {
       setSnackbar({ open: true, message: 'Failed to create listener', severity: 'error' });
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -197,7 +201,13 @@ const Listeners: React.FC = () => {
       </TableContainer>
 
       {/* Create Listener Dialog */}
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="xs" fullWidth>
+      <Dialog
+        open={dialogOpen}
+        onClose={(_, reason) => { if (!submitting || reason !== 'backdropClick') setDialogOpen(false); }}
+        disableEscapeKeyDown={submitting}
+        maxWidth="xs"
+        fullWidth
+      >
         <DialogTitle>New Listener</DialogTitle>
         <DialogContent sx={{ pt: '16px !important' }}>
           <TextField
@@ -237,10 +247,10 @@ const Listeners: React.FC = () => {
           <Button
             onClick={handleCreate}
             variant="contained"
-            disabled={!newListener.name.trim()}
+            disabled={!newListener.name.trim() || submitting}
             sx={{ backgroundColor: '#4e9af1', '&:hover': { backgroundColor: '#5ba8ff' } }}
           >
-            Create
+            {submitting ? 'Creating…' : 'Create'}
           </Button>
         </DialogActions>
       </Dialog>

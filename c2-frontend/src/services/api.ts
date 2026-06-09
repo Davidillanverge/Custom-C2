@@ -23,6 +23,7 @@ export interface Task {
 export interface TaskResult {
   task_id: number;
   result: string;
+  created_at?: string;
 }
 
 export function isFileResult(result: string): boolean {
@@ -73,10 +74,47 @@ const api = axios.create({
   timeout: 10000,
 });
 
-export const agentAPI = {
-  getAgents: () => api.get('/agents/').then(res => res.data.agents),
+// ── Auth helpers ─────────────────────────────────────────────────────────────
 
-  getAgent: (id: number) => api.get(`/agents/${id}`).then(res => res.data),
+export function setAuthToken(token: string | null): void {
+  if (token) {
+    sessionStorage.setItem('c2_token', token);
+    api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+  } else {
+    sessionStorage.removeItem('c2_token');
+    delete api.defaults.headers.common['Authorization'];
+  }
+}
+
+export function getStoredToken(): string | null {
+  return sessionStorage.getItem('c2_token');
+}
+
+// Re-apply stored token on module load (page refresh)
+const _storedToken = getStoredToken();
+if (_storedToken) {
+  api.defaults.headers.common['Authorization'] = `Bearer ${_storedToken}`;
+}
+
+// ── Global error interceptor ─────────────────────────────────────────────────
+
+api.interceptors.response.use(
+  response => response,
+  error => {
+    if (error.response?.status === 401) {
+      setAuthToken(null);
+      window.dispatchEvent(new Event('c2:unauthorized'));
+    }
+    return Promise.reject(error);
+  },
+);
+
+// ── Agent API ─────────────────────────────────────────────────────────────────
+
+export const agentAPI = {
+  getAgents: () => api.get('/agents/').then(res => res.data.agents as Agent[]),
+
+  getAgent: (id: number) => api.get(`/agents/${id}`).then(res => res.data as Agent),
 
   deleteAgent: (id: number) => api.delete(`/agents/${id}`),
 
@@ -84,30 +122,44 @@ export const agentAPI = {
 
   checkOutAgent: (id: number) => api.post(`/agents/${id}/checkout`),
 
-  sendTask: (agentId: number, task: { command: string; arguments: string[]; file?: string; file2?: string; filename?: string }) =>
-    api.post(`/agents/${agentId}/task`, task),
+  sendTask: (
+    agentId: number,
+    task: { command: string; arguments: string[]; file?: string; file2?: string; filename?: string },
+  ) =>
+    api
+      .post(`/agents/${agentId}/task`, task, { timeout: 120_000 })
+      .then(r => r.data as { message: string; task_id: number }),
 
-  getTasks: (agentId: number) => api.get(`/agents/${agentId}/tasks`).then(res => res.data.tasks),
+  getTasks: (agentId: number) =>
+    api.get(`/agents/${agentId}/tasks`).then(res => res.data.tasks as Task[]),
 
-  getResults: (agentId: number) => api.get(`/agents/${agentId}/results`).then(res => res.data.results),
+  getResults: (agentId: number) =>
+    api.get(`/agents/${agentId}/results`).then(res => res.data.results as TaskResult[]),
 
   getResult: (agentId: number, taskId: number) =>
-    api.get(`/agents/${agentId}/results/${taskId}`).then(res => res.data),
+    api.get(`/agents/${agentId}/results/${taskId}`).then(res => res.data as TaskResult),
 
   downloadFileUrl: (agentId: number, taskId: number): string =>
     `${BASE_URL}/agents/${agentId}/results/${taskId}/file`,
 };
 
-export const listenerAPI = {
-  getListeners: () => api.get('/listeners/').then(res => res.data || res),
+// ── Listener API ──────────────────────────────────────────────────────────────
 
-  getListener: (name: string) => api.get(`/listeners/${name}`).then(res => res.data),
+export const listenerAPI = {
+  getListeners: () =>
+    api.get('/listeners/').then(res => (res.data || res) as Listener[]),
+
+  getListener: (name: string) =>
+    api.get(`/listeners/${name}`).then(res => res.data as Listener),
 
   createListener: (listener: { name: string; type: string; port: number }) =>
     api.post('/listeners/create', listener),
 
-  removeListener: (name: string) => api.delete('/listeners/remove', { data: { name } }),
+  removeListener: (name: string) =>
+    api.delete('/listeners/remove', { data: { name } }),
 };
+
+// ── Builder API ───────────────────────────────────────────────────────────────
 
 export interface BuilderCheck {
   available: boolean;

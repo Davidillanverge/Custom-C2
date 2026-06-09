@@ -84,9 +84,12 @@ def create_listener():
     """
     data = request.get_json()
     if _svc().get_listener_by_name(data['name']) is not None:
-        return f"Listener {data['name']} already exists", 500
+        return jsonify({'error': f"Listener {data['name']} already exists"}), 409
     listener = HTTPListener(data['name'], port=data['port'], agent_service=_agent_svc())
-    listener.start()
+    try:
+        listener.start()
+    except OSError as e:
+        return jsonify({'error': f"Cannot bind to port {data['port']}: {e}"}), 409
     _svc().create_listener(listener)
     return jsonify(listener.get_info()), 201
 

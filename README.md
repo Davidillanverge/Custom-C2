@@ -156,16 +156,16 @@ C++ Visual Studio project that builds a **DLL**. When injected into a process, `
 |------|---------|
 | `main.cpp` | `DllMain` entry point + `AgentThread` worker |
 | `AgentConfig.cpp` / `AgentConfig.h` | Four magic-prefixed config arrays (host, port, sleep ms, jitter ms) patched by TeamServer at build time |
-| `Agent.cpp` / `Agent.h` | Task queue, result queue; all commands registered as `std::function<std::string(const Task&)>` lambdas in `loadCommands()` |
-| `HTTPCommunicationModule.cpp` / `.h` | HTTP beaconing loop — interruptible sleep with jitter via `WaitForSingleObject` |
-| `HttpClient.cpp` / `.h` | Low-level WinHTTP wrapper |
+| `Agent.cpp` / `Agent.h` | Task/result queues protected by `std::mutex` + `std::condition_variable`; `Work()` wakes within 100 ms of a new task instead of sleeping 1 s |
+| `HTTPCommunicationModule.cpp` / `.h` | HTTP beaconing loop — interruptible sleep with jitter; restores results to queue on network failure; HTTPS auto-detected on port 443 |
+| `HttpClient.cpp` / `.h` | WinHTTP wrapper — persistent `hConnect` (re-created only on host/port change); TLS via `WINHTTP_FLAG_SECURE` |
 | `Helpers.cpp` / `.h` | Base64, JSON helpers, system-info (hostname, arch, integrity level); parses `file` and `file2` from task JSON |
 | `Commands.h` | Command function declarations |
 | `Whoami.cpp`, `Shell.cpp`, `Run.cpp`, `Pwd.cpp`, `Cd.cpp`, `Ls.cpp` | Built-in command implementations |
 | `Download.cpp` / `.h` | Read a file via `CreateFileA` + `ReadFile` and return it base64-encoded |
 | `Upload.cpp` / `.h` | Decode the base64 payload from the task and write it via `CreateFileA` + `WriteFile` |
-| `InlineAssembly.cpp` / `.h` | Load and run a .NET assembly in-memory via `ICLRMetaHost` / `ICorRuntimeHost`; stdout captured with a pipe |
-| `BOF.cpp` / `.h` | Execute COFF/BOF files in-memory; packs arguments in Cobalt Strike BOF format (`BeaconDataExtract` compatible) |
+| `InlineAssembly.cpp` / `.h` | Load and run a .NET assembly in-memory via `ICLRMetaHost` / `ICorRuntimeHost`; stdout captured with a loop-read pipe; `UnloadDomain()` called on cleanup |
+| `BOF.cpp` / `.h` | Execute COFF/BOF files in-memory; x86 (`DIR32`/`REL32`) and x64 relocations; `thread_local` output buffer (safe for concurrent calls); arguments in Cobalt Strike BOF format |
 
 **Built-in commands (Windows agent)**
 
@@ -199,15 +199,15 @@ AGENT_C2_JITTER_MS_CFG:[0xDE AD BE EF C2 C2 C2 C5] [jitter ms string,null-padded
 
 ### Frontend (`c2-frontend/`)
 
-React 19 + TypeScript operator UI. MUI v7 dark theme. Shared `AppContext` provides agent/listener counts and connection status to `StatusBar` without duplicating API calls.
+React 19 + TypeScript operator UI. MUI v7 dark theme. `AuthContext` gates the entire app behind an optional token prompt. `AppContext` provides full `agents[]` and `listeners[]` arrays (plus counts and connection status) with adaptive polling (5 s when disconnected, 30 s when connected) — no component makes its own polling calls.
 
 | Route | Component | Purpose |
 |-------|-----------|---------|
-| `/` | `Dashboard` | Split-panel overview — agents (top 60%) + listeners (bottom 40%), auto-refreshes every 30 s |
-| `/agents` | `Agents` | Agent table — status dot, metadata, interact / check-in / remove; paginated at 15 rows |
-| `/agent/:id` | `AgentDetail` | Terminal console — send tasks, poll results every 5 s, quick-command chips, ArrowUp/Down command history, 10 MB file size limit |
-| `/listeners` | `Listeners` | Create / remove HTTP listeners |
-| `/builder` | `Builder` | Patch pre-compiled DLL; auto-polls every 3 s while any build is pending or running |
+| `/` | `Dashboard` | Split-panel overview — agents (top 60%) + listeners (bottom 40%), data from `AppContext` |
+| `/agents` | `Agents` | Agent table — status dot, metadata, interact / check-in / remove; paginated at 15 rows; page auto-clamped after agent removal |
+| `/agent/:id` | `AgentDetail` | Terminal console — send tasks, poll results every 5 s, quick-command chips with argument hints, ArrowUp/Down history, 10 MB file limit, waiting indicator (⌛) per in-flight task, session reload separator |
+| `/listeners` | `Listeners` | Create / remove HTTP listeners; dialog locked against backdrop/escape while request is in flight |
+| `/builder` | `Builder` | Patch pre-compiled DLL; auto-polls every 3 s while any build is pending or running; dialog locked while submitting |
 
 ---
 
@@ -248,6 +248,18 @@ Enable debug logging by setting `FLASK_DEBUG=1` before starting:
 ```bash
 FLASK_DEBUG=1 python main.py
 ```
+
+**Optional: enable API authentication**
+
+Set `TEAMSERVER_TOKEN` before starting to require a bearer token on every API request:
+
+```bash
+TEAMSERVER_TOKEN=mysecrettoken python main.py
+```
+
+All requests must then include `Authorization: Bearer mysecrettoken`. The HTTPListener (agent beacon endpoint) is exempt — it uses its own `Authorization: Bearer <base64(metadata)>` scheme. When `TEAMSERVER_TOKEN` is unset, authentication is disabled (development default).
+
+To enable the login prompt in the frontend, also set `REACT_APP_AUTH_REQUIRED=true` in `c2-frontend/.env` and enter the same token in the Login screen.
 
 ### 2. Create a listener
 
@@ -321,6 +333,7 @@ Inject the downloaded DLL into any Windows process using your preferred injectio
 | Location | Setting | Default |
 |----------|---------|---------|
 | `TeamServer/main.py` | TeamServer API port | `8000` |
+| `$TEAMSERVER_TOKEN` (env) | Bearer token required on all API requests | *(unset — auth disabled)* |
 | `Agent/main.py:25` | Listener host (Python agent) | `localhost` |
 | `Agent/main.py:25` | Listener port (Python agent) | `8080` |
 | `AgentWindows/AgentWindows/AgentConfig.cpp` | Default host in base DLL | `172.16.97.1` |
@@ -328,8 +341,11 @@ Inject the downloaded DLL into any Windows process using your preferred injectio
 | `AgentWindows/AgentWindows/AgentConfig.cpp` | Default beacon sleep in base DLL | `5000` ms |
 | `AgentWindows/AgentWindows/AgentConfig.cpp` | Default beacon jitter in base DLL | `1000` ms |
 | `c2-frontend/.env` | TeamServer base URL | `http://localhost:8000` |
+| `c2-frontend/.env` | `REACT_APP_AUTH_REQUIRED` — show login gate | `false` |
 
 The base DLL defaults in `AgentConfig.cpp` only matter for manual runs directly from Visual Studio; they are always overwritten by the patcher before delivery.
+
+Large task file payloads (base64-encoded `file` / `file2` fields) are stored on disk under `TeamServer/task_files/` rather than inline in SQLite, keeping the database compact. Files are deleted automatically when their task or parent agent is removed.
 
 ---
 
@@ -348,7 +364,7 @@ Interactive docs: `http://localhost:8000/apidocs`
 | `DELETE` | `/agents/{id}` | Remove agent |
 | `POST` | `/agents/{id}/checkin` | Mark agent last-seen as now |
 | `POST` | `/agents/{id}/checkout` | Clear agent last-seen (mark offline) |
-| `POST` | `/agents/{id}/task` | Queue a task `{command, arguments, file?, file2?, filename?}` |
+| `POST` | `/agents/{id}/task` | Queue a task `{command, arguments, file?, file2?, filename?}` → `{message, task_id}` |
 | `GET` | `/agents/{id}/tasks` | List all queued tasks |
 | `GET` | `/agents/{id}/results` | List all task results |
 | `GET` | `/agents/{id}/results/{task_id}` | Get result for a specific task |
@@ -360,7 +376,7 @@ Interactive docs: `http://localhost:8000/apidocs`
 |--------|------|-------------|
 | `GET` | `/listeners/` | List active listeners |
 | `GET` | `/listeners/{name}` | Get listener by name |
-| `POST` | `/listeners/create` | Create & start listener `{name, type, port}` |
+| `POST` | `/listeners/create` | Create & start listener `{name, type, port}` → `409` if name already exists or port is in use |
 | `DELETE` | `/listeners/remove` | Stop & remove listener `{name}` |
 
 ### Builder
@@ -447,18 +463,19 @@ C2/
 ├── .gitignore
 │
 ├── TeamServer/                        # Python/Flask REST API (port 8000)
-│   ├── main.py                        # App factory — DB + services in app.extensions
+│   ├── main.py                        # App factory — auth hook, DB + services in app.extensions
 │   ├── c2.db                          # SQLite database (git-ignored)
+│   ├── task_files/                    # large task file blobs stored on disk (git-ignored)
 │   ├── Database/
-│   │   └── database.py                # SQLite persistence layer (WAL, thread-safe)
+│   │   └── database.py                # SQLite persistence (WAL, thread-safe); @FILE: sentinels for blobs
 │   ├── Controllers/
-│   │   ├── agent_controller.py        # services via current_app.extensions
-│   │   ├── listeners_controller.py
-│   │   └── builder_controller.py
+│   │   ├── agent_controller.py        # POST /task returns {message, task_id}; secrets.randbelow IDs
+│   │   ├── listeners_controller.py    # 409 on duplicate name or port-in-use
+│   │   └── builder_controller.py      # atomic delete_build() via service lock
 │   ├── Services/
-│   │   ├── agent_service.py           # DB-backed, thread-safe; no global singleton
+│   │   ├── agent_service.py           # DB-backed, thread-safe; at-most-once task delivery
 │   │   ├── listeners_service.py       # thread-safe list
-│   │   └── builder_service.py         # binary patcher, async background thread
+│   │   └── builder_service.py         # binary patcher, async; delete_build() validates inside lock
 │   ├── Models/
 │   │   ├── Agent/
 │   │   │   ├── agent.py               # results capped at 500, thread-safe
@@ -514,19 +531,21 @@ C2/
 │       └── BOF.cpp / .h               # COFF/BOF in-memory executor
 │
 ├── c2-frontend/                       # React 19 + TypeScript operator UI
-│   ├── .env                           # REACT_APP_API_URL=http://localhost:8000
+│   ├── .env                           # REACT_APP_API_URL, REACT_APP_AUTH_REQUIRED
 │   ├── src/
-│   │   ├── App.tsx                    # router wrapped in AppContextProvider
+│   │   ├── App.tsx                    # AuthProvider → Login gate → AppContextProvider + Router
 │   │   ├── theme.ts                   # MUI dark theme
 │   │   ├── context/
-│   │   │   └── AppContext.tsx         # shared agentCount, listenerCount, connected
-│   │   ├── services/api.ts            # agentAPI, listenerAPI, builderAPI
+│   │   │   ├── AppContext.tsx         # agents[], listeners[], counts, adaptive polling
+│   │   │   └── AuthContext.tsx        # isAuthenticated, login, logout; c2:unauthorized event
+│   │   ├── services/api.ts            # agentAPI, listenerAPI, builderAPI; token helpers; 401 interceptor
 │   │   └── components/
-│   │       ├── Dashboard.tsx
-│   │       ├── Agents.tsx             # 15-row pagination
-│   │       ├── AgentDetail.tsx        # command history, 10 MB file limit
-│   │       ├── Listeners.tsx
-│   │       ├── Builder.tsx            # polls every 3 s while builds are in progress
+│   │       ├── Login.tsx              # token prompt shown when REACT_APP_AUTH_REQUIRED=true
+│   │       ├── Dashboard.tsx          # consumes AppContext — no own API calls
+│   │       ├── Agents.tsx             # 15-row pagination; page auto-clamped on removal
+│   │       ├── AgentDetail.tsx        # waiting indicator, session separator, arg hints on chips
+│   │       ├── Listeners.tsx          # dialog locked while submitting
+│   │       ├── Builder.tsx            # polls every 3 s while builds pending; dialog locked while submitting
 │   │       ├── Sidebar.tsx
 │   │       ├── Navbar.tsx
 │   │       └── StatusBar.tsx          # reads from AppContext

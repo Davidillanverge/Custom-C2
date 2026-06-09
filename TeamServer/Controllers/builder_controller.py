@@ -184,10 +184,9 @@ def delete_build(build_id):
       404:
         description: Build not found
     """
-    build = _svc().get_build(build_id)
-    if not build:
-        return jsonify({'error': 'Build not found'}), 404
-    if build.status in (BuildStatus.PENDING, BuildStatus.RUNNING):
+    ok, reason = _svc().delete_build(build_id)
+    if not ok:
+        if reason == 'not_found':
+            return jsonify({'error': 'Build not found'}), 404
         return jsonify({'error': 'Cannot delete a build that is still in progress'}), 409
-    _svc().delete_build(build_id)
     return jsonify({'message': 'Build deleted'}), 200

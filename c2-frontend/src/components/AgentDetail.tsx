@@ -6,17 +6,34 @@ import { agentAPI, Agent, Task, TaskResult, isFileResult, parseFileResult } from
 
 interface ConsoleEntry {
   key: number;
-  type: 'command' | 'output' | 'info' | 'error' | 'download';
+  type: 'command' | 'output' | 'info' | 'error' | 'download' | 'waiting' | 'separator';
   content: string;
   timestamp: Date;
   taskId?: number;
   filename?: string;
 }
 
-const PREDEFINED_CMDS = [
-  'whoami', 'id', 'pwd', 'ls', 'hostname', 'ps', 'uname -a',
-  'ifconfig', 'netstat', 'cat /etc/passwd', 'download', 'upload',
-  'make_token', 'steal_token', 'rev2self', 'set_sleep', 'inline-assembly', 'bof',
+interface CmdHint { cmd: string; argHint?: string }
+
+const PREDEFINED_CMDS: CmdHint[] = [
+  { cmd: 'whoami' },
+  { cmd: 'id' },
+  { cmd: 'pwd' },
+  { cmd: 'ls',          argHint: '<path>' },
+  { cmd: 'hostname' },
+  { cmd: 'ps' },
+  { cmd: 'uname -a' },
+  { cmd: 'ifconfig' },
+  { cmd: 'netstat' },
+  { cmd: 'cat /etc/passwd' },
+  { cmd: 'download',    argHint: '<remote path>' },
+  { cmd: 'upload',      argHint: '<dest path>' },
+  { cmd: 'make_token' },
+  { cmd: 'steal_token', argHint: '<pid>' },
+  { cmd: 'rev2self' },
+  { cmd: 'set_sleep' },
+  { cmd: 'inline-assembly' },
+  { cmd: 'bof',         argHint: '<arg1> <arg2>…' },
 ];
 
 const AgentDetail: React.FC = () => {
@@ -38,11 +55,12 @@ const AgentDetail: React.FC = () => {
   const [makeTokenFields, setMakeTokenFields] = useState({ username: '', domain: '', password: '' });
   const [sleepFields, setSleepFields] = useState({ interval: '5000', jitter: '1000' });
 
-  const consoleEndRef = useRef<HTMLDivElement>(null);
-  const seenResultIds = useRef<Set<number>>(new Set());
-  const entryKey = useRef(0);
-  const historyRef = useRef<Array<{ cmd: string; args: string }>>([]);
-  const historyIdxRef = useRef(-1);
+  const consoleEndRef   = useRef<HTMLDivElement>(null);
+  const seenResultIds   = useRef<Set<number>>(new Set());
+  const entryKey        = useRef(0);
+  const historyRef      = useRef<Array<{ cmd: string; args: string }>>([]);
+  const historyIdxRef   = useRef(-1);
+  const isInitialLoad   = useRef(true);
 
   const nextKey = () => ++entryKey.current;
 
@@ -73,14 +91,24 @@ const AgentDetail: React.FC = () => {
       );
       seenResultIds.current = new Set(resultsData.map((r) => r.task_id));
 
-      const initial: ConsoleEntry[] = [
-        {
+      const initial: ConsoleEntry[] = [];
+
+      if (isInitialLoad.current) {
+        isInitialLoad.current = false;
+        initial.push({
           key: nextKey(),
           type: 'info',
           content: `Session opened — ${agentData.hostname} / ${agentData.username} / ${agentData.arch} / ${agentData.integrity}`,
           timestamp: new Date(),
-        },
-      ];
+        });
+      } else {
+        initial.push({
+          key: nextKey(),
+          type: 'separator',
+          content: '— session reloaded —',
+          timestamp: new Date(),
+        });
+      }
 
       for (const task of tasksData) {
         const fileTag = task.filename ? ` [${task.filename}]` : '';
@@ -155,7 +183,12 @@ const AgentDetail: React.FC = () => {
           }
         }
         if (newEntries.length > 0) {
-          setEntries((prev) => [...prev, ...newEntries]);
+          const arrivedIds = new Set(newEntries.map(e => e.taskId).filter(Boolean));
+          setEntries((prev) => {
+            // Remove 'waiting' entries for tasks that now have results
+            const filtered = prev.filter(e => !(e.type === 'waiting' && e.taskId != null && arrivedIds.has(e.taskId)));
+            return [...filtered, ...newEntries];
+          });
         }
       } catch (e) {
         console.warn('Results poll failed:', e);
@@ -207,13 +240,17 @@ const AgentDetail: React.FC = () => {
     setSleepFields({ interval: '5000', jitter: '1000' });
 
     try {
-      await agentAPI.sendTask(agentId, {
+      const { task_id } = await agentAPI.sendTask(agentId, {
         command: cmd,
         arguments: taskArguments,
         file: selectedFile?.base64 ?? '',
         file2: selectedFile2?.base64 ?? '',
         filename: selectedFile?.name ?? '',
       });
+      setEntries(prev => [
+        ...prev,
+        { key: nextKey(), type: 'waiting', content: 'Waiting for result…', timestamp: new Date(), taskId: task_id },
+      ]);
     } catch {
       appendEntry('error', 'Failed to send task to agent');
     }
@@ -476,6 +513,24 @@ const AgentDetail: React.FC = () => {
             );
           }
 
+          if (entry.type === 'waiting') {
+            return (
+              <Typography key={entry.key} sx={{ color: '#555', fontSize: '11px', mb: 0.5, fontStyle: 'italic' }}>
+                ⌛ {entry.content}
+              </Typography>
+            );
+          }
+
+          if (entry.type === 'separator') {
+            return (
+              <Box key={entry.key} sx={{ display: 'flex', alignItems: 'center', gap: 1, my: 1, opacity: 0.4 }}>
+                <Box sx={{ flex: 1, height: '1px', backgroundColor: '#3c3c3c' }} />
+                <Typography sx={{ color: '#555', fontSize: '10px', whiteSpace: 'nowrap' }}>{entry.content}</Typography>
+                <Box sx={{ flex: 1, height: '1px', backgroundColor: '#3c3c3c' }} />
+              </Box>
+            );
+          }
+
           // info
           return (
             <Typography key={entry.key} sx={{ color: '#ddb100', fontSize: '11px', mb: 0.5 }}>
@@ -499,22 +554,23 @@ const AgentDetail: React.FC = () => {
           flexShrink: 0,
         }}
       >
-        {PREDEFINED_CMDS.map((cmd) => (
-          <Chip
-            key={cmd}
-            label={cmd}
-            size="small"
-            onClick={() => handleCommandChange(cmd)}
-            sx={{
-              height: '16px',
-              fontSize: '10px',
-              backgroundColor: '#2d2d2d',
-              color: '#9cdcfe',
-              borderRadius: '2px',
-              cursor: 'pointer',
-              '&:hover': { backgroundColor: '#3c3c3c' },
-            }}
-          />
+        {PREDEFINED_CMDS.map(({ cmd, argHint }) => (
+          <Tooltip key={cmd} title={argHint ? `args: ${argHint}` : ''} placement="top">
+            <Chip
+              label={cmd}
+              size="small"
+              onClick={() => handleCommandChange(cmd)}
+              sx={{
+                height: '16px',
+                fontSize: '10px',
+                backgroundColor: '#2d2d2d',
+                color: '#9cdcfe',
+                borderRadius: '2px',
+                cursor: 'pointer',
+                '&:hover': { backgroundColor: '#3c3c3c' },
+              }}
+            />
+          </Tooltip>
         ))}
       </Box>
 

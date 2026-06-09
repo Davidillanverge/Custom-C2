@@ -1,6 +1,6 @@
 import logging
 import os
-from flask import Flask
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flasgger import Swagger
 from Database.database import Database
@@ -32,6 +32,18 @@ def create_app():
     app.register_blueprint(listeners_bp, url_prefix='/listeners')
     app.register_blueprint(agent_bp,     url_prefix='/agents')
     app.register_blueprint(builder_bp,   url_prefix='/builder')
+
+    _token = os.getenv('TEAMSERVER_TOKEN', '').strip()
+
+    @app.before_request
+    def _check_auth():
+        if not _token:
+            return  # auth disabled — no token configured
+        if request.method == 'OPTIONS':
+            return  # let CORS preflight through
+        auth = request.headers.get('Authorization', '')
+        if not auth.startswith('Bearer ') or auth[7:] != _token:
+            return jsonify({'error': 'Unauthorized'}), 401
 
     return app
 

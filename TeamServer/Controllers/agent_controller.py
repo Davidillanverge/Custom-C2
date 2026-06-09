@@ -1,6 +1,6 @@
 import base64
 import datetime
-import random
+import secrets
 from flask import Blueprint, request, Response
 from flask import current_app
 from Models.Agent.agent import Agent
@@ -155,7 +155,7 @@ def add_task(agent_id):
     if agent:
         task_data = request.json
         task = Task(
-            id=random.randint(100000, 999999),
+            id=secrets.randbelow(2 ** 31),
             command=task_data.get("command"),
             arguments=task_data.get("arguments"),
             file=task_data.get("file"),
@@ -163,7 +163,7 @@ def add_task(agent_id):
             filename=task_data.get("filename"),
         )
         _svc().add_task(agent, task)
-        return {'message': 'Task added successfully'}, 200
+        return {'message': 'Task added successfully', 'task_id': task.id}, 200
     return {'error': 'Agent not found'}, 404
 
 

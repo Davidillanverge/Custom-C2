@@ -1,7 +1,6 @@
 #include "Agent.h"
 #include "AgentConfig.h"
 #include "Commands.h"
-#include <iostream>
 #include <thread>
 #include <chrono>
 #include <random>
@@ -72,28 +71,37 @@ AgentMetadata Agent::getMetadata(){
 	return Metadata;
 }
 
-void Agent::addTask(const Task& task){
-	Tasks.push(task);
+void Agent::addTask(const Task& task) {
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		Tasks.push(task);
+	}
+	m_taskCv.notify_one();
 }
 
 Task Agent::getNextTask() {
-	Task task = Agent::Tasks.front();
+	std::lock_guard<std::mutex> lock(m_mutex);
+	Task task = Tasks.front();
 	Tasks.pop();
-
 	return task;
 }
 
-void Agent::addResult(const TaskResult& result) { Results.push(result); }
+void Agent::addResult(const TaskResult& result) {
+	std::lock_guard<std::mutex> lock(m_mutex);
+	Results.push(result);
+}
 
 TaskResult Agent::getNextResult() {
+	std::lock_guard<std::mutex> lock(m_mutex);
 	TaskResult result = Results.front();
 	Results.pop();
 	return result;
 }
 
 std::vector<TaskResult> Agent::getTaskResults() {
+	std::lock_guard<std::mutex> lock(m_mutex);
 	std::vector<TaskResult> results_toret;
-	while (Results.empty() != true) {
+	while (!Results.empty()) {
 		results_toret.push_back(Results.front());
 		Results.pop();
 	}
@@ -101,29 +109,28 @@ std::vector<TaskResult> Agent::getTaskResults() {
 }
 
 void Agent::executeTask(Task& task) {
-	std::cout << "Executing task: " << task.id << std::endl;
-
 	std::string command_output;
 	auto it = Commands.find(task.command);
 	if (it != Commands.end()) {
 		command_output = it->second(task);
 	} else {
-		command_output = "Comando no encontrado";
+		command_output = "Command not found";
 	}
 
-	std::cout << "Commands Output: " << command_output << std::endl;
 	TaskResult result = { task.id, command_output };
-	Agent::addResult(result);
+	addResult(result);
 }
 
 void Agent::Work() {
 	while (true) {
-		std::cout << "Working Tasks ...." << std::endl;
+		std::unique_lock<std::mutex> lock(m_mutex);
+		// Wait up to 100 ms for a task to arrive instead of busy-sleeping for 1 s.
+		m_taskCv.wait_for(lock, std::chrono::milliseconds(100), [this]{ return !Tasks.empty(); });
 		if (!Tasks.empty()) {
-			Task task = Agent::getNextTask();
-			Agent::executeTask(task);
-
+			Task task = Tasks.front();
+			Tasks.pop();
+			lock.unlock();
+			executeTask(task);
 		}
-		std::this_thread::sleep_for(std::chrono::seconds(1));
 	}
 }

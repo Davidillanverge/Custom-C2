@@ -292,7 +292,13 @@ const Builder: React.FC = () => {
       </TableContainer>
 
       {/* New Build Dialog */}
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="xs" fullWidth>
+      <Dialog
+        open={dialogOpen}
+        onClose={(_, reason) => { if (!submitting || reason !== 'backdropClick') setDialogOpen(false); }}
+        disableEscapeKeyDown={submitting}
+        maxWidth="xs"
+        fullWidth
+      >
         <DialogTitle>New Build</DialogTitle>
         <DialogContent sx={{ pt: '16px !important' }}>
           <TextField

@@ -75,15 +75,26 @@ class BuilderService:
         p = BUILDS_DIR / build_id / "agent_patched.dll"
         return p if p.exists() else None
 
-    def delete_build(self, build_id: str) -> bool:
+    def delete_build(self, build_id: str) -> tuple[bool, str | None]:
+        """Remove a build record and its artifact.
+
+        Returns ``(True, None)`` on success, or ``(False, reason)`` where
+        reason is ``'not_found'`` or ``'in_progress'``.  The status check is
+        performed inside the lock so it is atomic with the removal.
+        """
+        with self._lock:
+            build = self._builds.get(build_id)
+            if build is None:
+                return False, 'not_found'
+            if build.status in (BuildStatus.PENDING, BuildStatus.RUNNING):
+                return False, 'in_progress'
+            del self._builds[build_id]
+
         build_dir = BUILDS_DIR / build_id
         if build_dir.exists():
             shutil.rmtree(build_dir, ignore_errors=True)
-        with self._lock:
-            removed = self._builds.pop(build_id, None) is not None
-        if removed:
-            self._db.delete_build(build_id)
-        return removed
+        self._db.delete_build(build_id)
+        return True, None
 
     # ----------------------------------------------------------------- private
 

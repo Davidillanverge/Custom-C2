@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import {
   Box,
   Typography,
@@ -10,11 +10,10 @@ import {
   TableRow,
   IconButton,
   Tooltip,
-  Alert,
 } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { Refresh } from '@mui/icons-material';
-import { agentAPI, listenerAPI, Agent, Listener } from '../services/api';
+import { useAppContext } from '../context/AppContext';
 
 const StatusDot: React.FC<{ lastseen?: string }> = ({ lastseen }) => {
   const color = !lastseen
@@ -67,35 +66,11 @@ const PanelHeader: React.FC<{ title: string; count: number; onRefresh: () => voi
 );
 
 const Dashboard: React.FC = () => {
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [listeners, setListeners] = useState<Listener[]>([]);
-  const [error, setError] = useState('');
+  const { agents, listeners, refresh } = useAppContext();
   const navigate = useNavigate();
-
-  useEffect(() => {
-    loadData();
-    const interval = setInterval(loadData, 30000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const loadData = async () => {
-    try {
-      const [agentsData, listenersData] = await Promise.all([
-        agentAPI.getAgents(),
-        listenerAPI.getListeners(),
-      ]);
-      setAgents(agentsData);
-      setListeners(listenersData);
-      setError('');
-    } catch {
-      setError('Failed to connect to TeamServer');
-    }
-  };
 
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      {error && <Alert severity="error">{error}</Alert>}
-
       {/* Agents panel — top 60% */}
       <Box
         sx={{
@@ -106,7 +81,7 @@ const Dashboard: React.FC = () => {
           borderBottom: '2px solid #3c3c3c',
         }}
       >
-        <PanelHeader title="Agents" count={agents.length} onRefresh={loadData} />
+        <PanelHeader title="Agents" count={agents.length} onRefresh={refresh} />
         <TableContainer sx={{ flex: 1, overflow: 'auto' }}>
           <Table size="small" stickyHeader>
             <TableHead>
@@ -134,7 +109,7 @@ const Dashboard: React.FC = () => {
                   <TableRow
                     key={agent.id}
                     onClick={() => navigate(`/agent/${agent.id}`)}
-                    sx={{ '&:nth-of-type(odd)': { backgroundColor: '#1e1e1e' } }}
+                    sx={{ cursor: 'pointer', '&:nth-of-type(odd)': { backgroundColor: '#1e1e1e' } }}
                   >
                     <TableCell>
                       <StatusDot lastseen={agent.lastseen} />
@@ -145,9 +120,7 @@ const Dashboard: React.FC = () => {
                     <TableCell sx={{ color: '#9cdcfe' }}>{agent.processname}</TableCell>
                     <TableCell>{agent.pid}</TableCell>
                     <TableCell>{agent.arch}</TableCell>
-                    <TableCell
-                      sx={{ color: agent.integrity === 'High' ? '#4caf50' : '#ddb100' }}
-                    >
+                    <TableCell sx={{ color: agent.integrity === 'High' ? '#4caf50' : '#ddb100' }}>
                       {agent.integrity}
                     </TableCell>
                     <TableCell sx={{ color: '#858585' }}>
@@ -163,7 +136,7 @@ const Dashboard: React.FC = () => {
 
       {/* Listeners panel — bottom 40% */}
       <Box sx={{ flex: '0 0 40%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <PanelHeader title="Listeners" count={listeners.length} onRefresh={loadData} />
+        <PanelHeader title="Listeners" count={listeners.length} onRefresh={refresh} />
         <TableContainer sx={{ flex: 1, overflow: 'auto' }}>
           <Table size="small" stickyHeader>
             <TableHead>
@@ -194,9 +167,7 @@ const Dashboard: React.FC = () => {
                     <TableCell>{listener.port}</TableCell>
                     <TableCell>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                        <Box
-                          sx={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: '#4caf50' }}
-                        />
+                        <Box sx={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: '#4caf50' }} />
                         <Typography sx={{ fontSize: '11px', color: '#4caf50' }}>Running</Typography>
                       </Box>
                     </TableCell>
