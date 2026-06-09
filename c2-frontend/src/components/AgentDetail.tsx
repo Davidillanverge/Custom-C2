@@ -41,6 +41,8 @@ const AgentDetail: React.FC = () => {
   const consoleEndRef = useRef<HTMLDivElement>(null);
   const seenResultIds = useRef<Set<number>>(new Set());
   const entryKey = useRef(0);
+  const historyRef = useRef<Array<{ cmd: string; args: string }>>([]);
+  const historyIdxRef = useRef(-1);
 
   const nextKey = () => ++entryKey.current;
 
@@ -155,7 +157,9 @@ const AgentDetail: React.FC = () => {
         if (newEntries.length > 0) {
           setEntries((prev) => [...prev, ...newEntries]);
         }
-      } catch {}
+      } catch (e) {
+        console.warn('Results poll failed:', e);
+      }
     };
 
     const interval = setInterval(poll, 5000);
@@ -189,7 +193,10 @@ const AgentDetail: React.FC = () => {
       const file2Part = selectedFile2 ? ` [${selectedFile2.name}]` : '';
       displayCmd = `${cmd}${args.trim() ? ' ' + args.trim() : ''}${filePart}${file2Part}`;
       taskArguments = args.trim() ? args.trim().split(/\s+/) : [];
+      historyRef.current.unshift({ cmd, args: args.trim() });
+      if (historyRef.current.length > 100) historyRef.current.pop();
     }
+    historyIdxRef.current = -1;
 
     appendEntry('command', displayCmd);
     setCommand('');
@@ -223,21 +230,29 @@ const AgentDetail: React.FC = () => {
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      appendEntry('error', `File too large: ${file.name} (max 10 MB)`);
+      e.target.value = '';
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = reader.result as string;
-      // dataUrl = "data:<mime>;base64,<data>" — extract only the base64 part
       const base64 = dataUrl.split(',')[1];
       setSelectedFile({ name: file.name, base64 });
     };
     reader.readAsDataURL(file);
-    // Reset so the same file can be re-selected
     e.target.value = '';
   };
 
   const handleFileSelect2 = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      appendEntry('error', `File too large: ${file.name} (max 10 MB)`);
+      e.target.value = '';
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = reader.result as string;
@@ -250,6 +265,35 @@ const AgentDetail: React.FC = () => {
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') handleSend();
+  };
+
+  const handleCommandKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleSend();
+      return;
+    }
+    const history = historyRef.current;
+    if (e.key === 'ArrowUp' && history.length > 0) {
+      e.preventDefault();
+      const newIdx = Math.min(historyIdxRef.current + 1, history.length - 1);
+      historyIdxRef.current = newIdx;
+      const entry = history[newIdx];
+      handleCommandChange(entry.cmd);
+      setArgs(entry.args);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const newIdx = historyIdxRef.current - 1;
+      if (newIdx < 0) {
+        historyIdxRef.current = -1;
+        handleCommandChange('');
+        setArgs('');
+      } else {
+        historyIdxRef.current = newIdx;
+        const entry = history[newIdx];
+        handleCommandChange(entry.cmd);
+        setArgs(entry.args);
+      }
+    }
   };
 
   if (loading) {
@@ -493,7 +537,7 @@ const AgentDetail: React.FC = () => {
         <TextField
           value={command}
           onChange={(e) => handleCommandChange(e.target.value)}
-          onKeyDown={handleKeyDown}
+          onKeyDown={handleCommandKeyDown}
           placeholder="command"
           variant="outlined"
           size="small"

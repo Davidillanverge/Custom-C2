@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -67,12 +67,26 @@ const Builder: React.FC = () => {
         )
       );
       setCheck(checkData);
-    } catch { /* silent */ } finally {
+    } catch (e) {
+      console.warn('Failed to load builds:', e);
+    } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => { loadBuilds(); }, [loadBuilds]);
+
+  // Poll every 3 s while any build is pending or running
+  const hasPendingBuilds = useMemo(
+    () => builds.some(b => b.status === 'pending' || b.status === 'running'),
+    [builds]
+  );
+
+  useEffect(() => {
+    if (!hasPendingBuilds) return;
+    const interval = setInterval(loadBuilds, 3000);
+    return () => clearInterval(interval);
+  }, [hasPendingBuilds, loadBuilds]);
 
   const handleCreate = async () => {
     setSubmitting(true);
@@ -80,9 +94,10 @@ const Builder: React.FC = () => {
       await builderAPI.createBuild(form);
       setDialogOpen(false);
       setForm({ host: '', port: 8080, arch: 'x64', sleep_ms: 5000, jitter_ms: 1000 });
-      setSnackbar({ open: true, message: 'Build completed', severity: 'success' });
+      setSnackbar({ open: true, message: 'Build queued', severity: 'success' });
       await loadBuilds();
-    } catch {
+    } catch (e) {
+      console.warn('Failed to create build:', e);
       setSnackbar({ open: true, message: 'Failed to create build', severity: 'error' });
     } finally {
       setSubmitting(false);
@@ -93,7 +108,8 @@ const Builder: React.FC = () => {
     try {
       await builderAPI.deleteBuild(id);
       setBuilds(prev => prev.filter(b => b.id !== id));
-    } catch {
+    } catch (e) {
+      console.warn('Failed to delete build:', e);
       setSnackbar({ open: true, message: 'Failed to delete build', severity: 'error' });
     }
   };
@@ -107,7 +123,6 @@ const Builder: React.FC = () => {
     setLogOpen(true);
   };
 
-  // The selected arch's base DLL must be available
   const selectedArchAvailable = check?.archs[form.arch] ?? false;
   const formValid = form.host.trim() !== ''
     && form.port >= 1 && form.port <= 65535
@@ -131,7 +146,6 @@ const Builder: React.FC = () => {
           Builder ({builds.length})
         </Typography>
 
-        {/* Per-arch DLL availability pills */}
         {check && (
           <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', mr: 0.5 }}>
             {ARCHS.map(arch => (
@@ -176,7 +190,6 @@ const Builder: React.FC = () => {
         </Tooltip>
       </Box>
 
-      {/* Warning when no base DLLs are present */}
       {check && !check.available && (
         <Alert severity="warning" sx={{ borderRadius: 0, py: 0.5, fontSize: '12px' }}>
           No base DLLs found in <code>AgentWindows/dist/</code>. Compile the agent in
@@ -184,7 +197,6 @@ const Builder: React.FC = () => {
         </Alert>
       )}
 
-      {/* Build history table */}
       <TableContainer sx={{ flex: 1, overflow: 'auto' }}>
         <Table size="small" stickyHeader>
           <TableHead>
@@ -263,6 +275,7 @@ const Builder: React.FC = () => {
                           <IconButton
                             size="small"
                             onClick={() => handleDelete(build.id)}
+                            disabled={build.status === 'pending' || build.status === 'running'}
                             sx={{ p: 0.25 }}
                           >
                             <Delete sx={{ fontSize: 14, color: '#f44747' }} />
@@ -365,7 +378,7 @@ const Builder: React.FC = () => {
             disabled={!formValid || submitting}
             sx={{ backgroundColor: '#4e9af1', '&:hover': { backgroundColor: '#5ba8ff' } }}
           >
-            {submitting ? 'Patching…' : 'Build'}
+            {submitting ? 'Sending…' : 'Build'}
           </Button>
         </DialogActions>
       </Dialog>

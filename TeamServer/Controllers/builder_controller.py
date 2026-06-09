@@ -1,11 +1,14 @@
 from flask import Blueprint, jsonify, request, send_file, abort
+from flask import current_app
 from Models.Build.build import BuildStatus
-from Services.builder_service import BuilderService
 
-builder_service = BuilderService()
 builder_bp = Blueprint('builder', __name__)
 
 VALID_ARCHS = ('x64', 'x86', 'ARM64')
+
+
+def _svc():
+    return current_app.extensions['builder_service']
 
 
 @builder_bp.route('/check', methods=['GET'])
@@ -18,10 +21,8 @@ def check_tools():
     responses:
       200:
         description: DLL availability per architecture
-        examples:
-          application/json: {"available": true, "archs": {"x64": true, "x86": false, "ARM64": false}}
     """
-    return jsonify(builder_service.check())
+    return jsonify(_svc().check())
 
 
 @builder_bp.route('/', methods=['GET'])
@@ -35,7 +36,7 @@ def list_builds():
       200:
         description: List of builds
     """
-    return jsonify([b.to_dict() for b in builder_service.get_all_builds()])
+    return jsonify([b.to_dict() for b in _svc().get_all_builds()])
 
 
 @builder_bp.route('/', methods=['POST'])
@@ -54,14 +55,15 @@ def create_build():
           properties:
             host:
               type: string
-              example: "192.168.1.10"
             port:
               type: integer
-              example: 4444
             arch:
               type: string
               enum: [x64, x86, ARM64]
-              example: "x64"
+            sleep_ms:
+              type: integer
+            jitter_ms:
+              type: integer
     responses:
       202:
         description: Build accepted and queued
@@ -101,7 +103,7 @@ def create_build():
     if jitter_ms >= sleep_ms:
         return jsonify({'error': 'jitter_ms must be less than sleep_ms'}), 400
 
-    build = builder_service.create_build(host, port, arch, sleep_ms, jitter_ms)
+    build = _svc().create_build(host, port, arch, sleep_ms, jitter_ms)
     return jsonify(build.to_dict()), 202
 
 
@@ -123,7 +125,7 @@ def get_build(build_id):
       404:
         description: Build not found
     """
-    build = builder_service.get_build(build_id)
+    build = _svc().get_build(build_id)
     if not build:
         return jsonify({'error': 'Build not found'}), 404
     return jsonify(build.to_dict())
@@ -149,13 +151,13 @@ def download_build(build_id):
       409:
         description: Build not in success state
     """
-    build = builder_service.get_build(build_id)
+    build = _svc().get_build(build_id)
     if not build:
         abort(404)
     if build.status != BuildStatus.SUCCESS:
         return jsonify({'error': 'Build not ready for download'}), 409
 
-    path = builder_service.artifact_path(build_id)
+    path = _svc().artifact_path(build_id)
     if not path:
         abort(404)
 
@@ -182,10 +184,10 @@ def delete_build(build_id):
       404:
         description: Build not found
     """
-    build = builder_service.get_build(build_id)
+    build = _svc().get_build(build_id)
     if not build:
         return jsonify({'error': 'Build not found'}), 404
     if build.status in (BuildStatus.PENDING, BuildStatus.RUNNING):
         return jsonify({'error': 'Cannot delete a build that is still in progress'}), 409
-    builder_service.delete_build(build_id)
+    _svc().delete_build(build_id)
     return jsonify({'message': 'Build deleted'}), 200

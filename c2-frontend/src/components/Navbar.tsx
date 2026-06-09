@@ -1,7 +1,7 @@
 import React from 'react';
 import { AppBar, Toolbar, Typography, Button, Box } from '@mui/material';
 import { Link, useLocation } from 'react-router-dom';
-import { Computer, Router, Dashboard } from '@mui/icons-material';
+import { Computer, Router, Dashboard, Construction } from '@mui/icons-material';
 
 const Navbar: React.FC = () => {
   const location = useLocation();
@@ -49,6 +49,18 @@ const Navbar: React.FC = () => {
             }}
           >
             Listeners
+          </Button>
+
+          <Button
+            color="inherit"
+            component={Link}
+            to="/builder"
+            startIcon={<Construction />}
+            sx={{
+              backgroundColor: location.pathname === '/builder' ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+            }}
+          >
+            Builder
           </Button>
         </Box>
       </Toolbar>

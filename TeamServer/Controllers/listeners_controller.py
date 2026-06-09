@@ -1,15 +1,20 @@
 from typing import List
 from flask import Blueprint, jsonify, request
-from flask import current_app as app
+from flask import current_app
 from Models.Listener.http_listener.httplistener import HTTPListener
 from Models.Listener.listener import Listener
-from Services.listeners_service import ListenerService
-
-listener_service : ListenerService = ListenerService()
 
 listeners_bp = Blueprint('listeners', __name__)
 
-# Ejemplo: obtener todos los usuarios
+
+def _svc():
+    return current_app.extensions['listener_service']
+
+
+def _agent_svc():
+    return current_app.extensions['agent_service']
+
+
 @listeners_bp.route('/', methods=['GET'])
 def get_listeners():
     """
@@ -20,11 +25,9 @@ def get_listeners():
     responses:
       200:
         description: Lista de Listeners
-        examples:
-          application/json: [{"host": "0.0.0.0","name": "Listener1", "port": 8080},{"host": "0.0.0.0", "name": "Listener2", "port": 8080}]
     """
-    listeners: List[HTTPListener] = listener_service.get_listeners()
-    return [listener.get_info() for listener in listeners]
+    return [listener.get_info() for listener in _svc().get_listeners()]
+
 
 @listeners_bp.route('/<string:name>', methods=['GET'])
 def get_listener(name):
@@ -38,17 +41,17 @@ def get_listener(name):
         name: name
         required: true
         type: string
-        example: "Listener1"
     responses:
       200:
         description: Listener INFO
-        examples:
-          application/json: [{"host": "0.0.0.0","name": "Listener1", "port": 8080}]
+      404:
+        description: Listener not found
     """
-    listener = listener_service.get_listener_by_name(name)
-    if listener == None:
-          return "Listener not found", 404
+    listener = _svc().get_listener_by_name(name)
+    if listener is None:
+        return "Listener not found", 404
     return listener.get_info(), 200
+
 
 @listeners_bp.route('/create', methods=['POST'])
 def create_listener():
@@ -59,12 +62,8 @@ def create_listener():
       - Listener
     parameters:
       - in: body
-        type: body
-        required: true
         name: body
         required: true
-        port: body
-        required: false
         schema:
           type: object
           properties:
@@ -75,23 +74,22 @@ def create_listener():
               type: string
               example: "Listener1"
             port:
-              type: int
+              type: integer
               example: 8080
     responses:
       201:
         description: Listener creado
-        examples:
-          application/json: {"type": "http", "name":"Listener1", "port":8080}
+      500:
+        description: El listener ya existe
     """
     data = request.get_json()
-    #TODO: Check listener type
-    listener = listener_service.get_listener_by_name(data['name'])
-    if listener != None:
-          return f"Listener {data['name']} already exists", 500
-    listener = HTTPListener(data['name'], port=data['port'])
-    listener.start()  
-    listener_service.create_listener(listener)
+    if _svc().get_listener_by_name(data['name']) is not None:
+        return f"Listener {data['name']} already exists", 500
+    listener = HTTPListener(data['name'], port=data['port'], agent_service=_agent_svc())
+    listener.start()
+    _svc().create_listener(listener)
     return jsonify(listener.get_info()), 201
+
 
 @listeners_bp.route('/remove', methods=['DELETE'])
 def remove_listener():
@@ -111,24 +109,23 @@ def remove_listener():
               type: string
               example: "Listener1"
     responses:
-      201:
-        description: Listener creado
-        examples:
-          application/json: {"name":"Listener1", "port":8080}
+      200:
+        description: Listener eliminado
+      404:
+        description: Listener not found
     """
     data = request.get_json()
     if not data or 'name' not in data:
         return "Invalid request data", 400
 
-    listener: Listener = listener_service.get_listener_by_name(data['name'])
+    listener: Listener = _svc().get_listener_by_name(data['name'])
     if listener is None:
         return f"Listener {data['name']} not found", 404
 
     try:
         listener.stop()
-        if listener_service.delete_listener(listener):
+        if _svc().delete_listener(listener):
             return f"Listener {data['name']} deleted", 200
-        else:
-            return f"Can not delete listener {data['name']}", 409
+        return f"Can not delete listener {data['name']}", 409
     except Exception as e:
         return f"Error stopping listener {data['name']}: {str(e)}", 500

@@ -66,8 +66,10 @@ export interface Build {
   error_log:   string;
 }
 
+const BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+
 const api = axios.create({
-  baseURL: 'http://localhost:8000',
+  baseURL: BASE_URL,
   timeout: 10000,
 });
 
@@ -93,7 +95,7 @@ export const agentAPI = {
     api.get(`/agents/${agentId}/results/${taskId}`).then(res => res.data),
 
   downloadFileUrl: (agentId: number, taskId: number): string =>
-    `http://localhost:8000/agents/${agentId}/results/${taskId}/file`,
+    `${BASE_URL}/agents/${agentId}/results/${taskId}/file`,
 };
 
 export const listenerAPI = {
@@ -129,7 +131,7 @@ export const builderAPI = {
     api.delete(`/builder/${id}`),
 
   downloadUrl: (id: string): string =>
-    `http://localhost:8000/builder/${id}/download`,
+    `${BASE_URL}/builder/${id}/download`,
 };
 
 export default api;

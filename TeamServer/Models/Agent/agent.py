@@ -1,9 +1,12 @@
 import datetime
+import threading
 from queue import Queue
 from typing import List
 from Models.Agent.agent_metadata import AgentMetadata
 from Models.Agent.task import Task
 from Models.Agent.task_result import TaskResult
+
+_MAX_RESULTS = 500
 
 
 class Agent:
@@ -12,6 +15,7 @@ class Agent:
         self.lastseen = None
         self.tasks: Queue = Queue()
         self.results: List[TaskResult] = []
+        self._results_lock = threading.Lock()
 
     def get_metadata(self) -> AgentMetadata:
         return self.metadata
@@ -42,7 +46,7 @@ class Agent:
             self.metadata.set_arch(value)
 
     def check_in(self):
-        self.set_lastseen(datetime.datetime.now())
+        self.set_lastseen(datetime.datetime.utcnow())
 
     def check_out(self):
         self.set_lastseen(None)
@@ -60,14 +64,19 @@ class Agent:
         return tasks
 
     def add_results(self, results: List[TaskResult]):
-        for result in results:
-            self.results.append(result)
+        with self._results_lock:
+            for result in results:
+                self.results.append(result)
+            if len(self.results) > _MAX_RESULTS:
+                self.results = self.results[-_MAX_RESULTS:]
 
     def get_results(self) -> List[TaskResult]:
-        return self.results
+        with self._results_lock:
+            return list(self.results)
 
     def get_result(self, task_id: int) -> TaskResult | None:
-        for result in self.results:
-            if result.get_task_id() == task_id:
-                return result
+        with self._results_lock:
+            for result in self.results:
+                if result.get_task_id() == task_id:
+                    return result
         return None

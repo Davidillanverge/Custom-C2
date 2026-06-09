@@ -4,6 +4,7 @@ import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import { Box } from '@mui/material';
 import { csTheme } from './theme';
+import { AppContextProvider } from './context/AppContext';
 import Sidebar from './components/Sidebar';
 import StatusBar from './components/StatusBar';
 import Dashboard from './components/Dashboard';
@@ -16,26 +17,28 @@ function App() {
   return (
     <ThemeProvider theme={csTheme}>
       <CssBaseline />
-      <Router>
-        <Box sx={{ display: 'flex', height: '100vh', flexDirection: 'column', overflow: 'hidden' }}>
-          <Box sx={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-            <Sidebar />
-            <Box
-              component="main"
-              sx={{ flex: 1, overflow: 'auto', backgroundColor: 'background.default', display: 'flex', flexDirection: 'column' }}
-            >
-              <Routes>
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/agents" element={<Agents />} />
-                <Route path="/agent/:id" element={<AgentDetail />} />
-                <Route path="/listeners" element={<Listeners />} />
-                <Route path="/builder"   element={<Builder />} />
-              </Routes>
+      <AppContextProvider>
+        <Router>
+          <Box sx={{ display: 'flex', height: '100vh', flexDirection: 'column', overflow: 'hidden' }}>
+            <Box sx={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+              <Sidebar />
+              <Box
+                component="main"
+                sx={{ flex: 1, overflow: 'auto', backgroundColor: 'background.default', display: 'flex', flexDirection: 'column' }}
+              >
+                <Routes>
+                  <Route path="/" element={<Dashboard />} />
+                  <Route path="/agents" element={<Agents />} />
+                  <Route path="/agent/:id" element={<AgentDetail />} />
+                  <Route path="/listeners" element={<Listeners />} />
+                  <Route path="/builder"   element={<Builder />} />
+                </Routes>
+              </Box>
             </Box>
+            <StatusBar />
           </Box>
-          <StatusBar />
-        </Box>
-      </Router>
+        </Router>
+      </AppContextProvider>
     </ThemeProvider>
   );
 }

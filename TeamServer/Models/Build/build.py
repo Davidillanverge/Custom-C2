@@ -23,6 +23,22 @@ class Build:
         self.finished_at = None
         self.error_log   = ""
 
+    @classmethod
+    def from_row(cls, row: dict) -> 'Build':
+        b = cls.__new__(cls)
+        b.id          = row['id']
+        b.host        = row['host']
+        b.port        = row['port']
+        b.arch        = row['arch']
+        b.sleep_ms    = row['sleep_ms']
+        b.jitter_ms   = row['jitter_ms']
+        b.status      = BuildStatus(row['status'])
+        b.created_at  = datetime.datetime.fromisoformat(row['created_at'])
+        b.finished_at = (datetime.datetime.fromisoformat(row['finished_at'])
+                         if row.get('finished_at') else None)
+        b.error_log   = row.get('error_log', '')
+        return b
+
     def to_dict(self) -> dict:
         return {
             "id":          self.id,

@@ -14,12 +14,12 @@ Live overview of connected agents and active listeners, auto-refreshes every 30 
 ![Dashboard](docs/screenshots/dashboard.png)
 
 ### Agents
-Full agent table with status indicators, last-seen timestamps, and per-agent actions.
+Full agent table with status indicators, last-seen timestamps, and per-agent actions. Paginated at 15 rows per page.
 
 ![Agents](docs/screenshots/agents.png)
 
 ### Agent Console
-Terminal-style interactive console. Send commands with built-in quick-command chips; output is polled and appended automatically.
+Terminal-style interactive console. Send commands with built-in quick-command chips; output is polled and appended automatically. Navigate command history with ArrowUp / ArrowDown.
 
 ![Agent Console](docs/screenshots/agent-detail.png)
 
@@ -29,12 +29,12 @@ Manage HTTP listeners. Create new ones on any port; stop and remove them at any 
 ![Listeners](docs/screenshots/listeners.png)
 
 ### Builder
-Generate ready-to-deploy agent DLLs by patching a pre-compiled binary with your listener's IP, port, beacon sleep interval, and jitter. The toolbar shows which architectures have a base DLL available.
+Generate ready-to-deploy agent DLLs by patching a pre-compiled binary with your listener's IP, port, beacon sleep interval, and jitter. Patching runs asynchronously — the build table polls automatically while a build is in progress.
 
 ![Builder](docs/screenshots/builder.png)
 
 ### Builder — New Build Dialog
-Select target architecture (only architectures with a base DLL in `AgentWindows/dist/` are enabled), enter the listener host, port, sleep interval (ms), and jitter (ms), and click Build. Patching completes in under a millisecond.
+Select target architecture (only architectures with a base DLL in `AgentWindows/dist/` are enabled), enter the listener host, port, sleep interval (ms), and jitter (ms), and click Build.
 
 ![Builder Dialog](docs/screenshots/builder-dialog.png)
 
@@ -47,36 +47,47 @@ Operator Browser
       │
       │  HTTP REST  (port 8000)
       ▼
-┌─────────────────────────────────────────────┐
-│               TeamServer                    │
-│  Flask API — agents · listeners · builder   │
-│  ┌─────────────┐  ┌──────────────────────┐  │
-│  │ AgentService│  │  ListenerService     │  │
-│  │ (singleton  │  │  (singleton + list)  │  │
-│  │  + lock)    │  └──────────────────────┘  │
-│  └──────┬──────┘  ┌──────────────────────┐  │
-│         │         │  BuilderService       │  │
-│         │         │  (binary patcher)     │  │
-│         │         └──────────────────────┘  │
-└─────────┼───────────────────────────────────┘
-          │  shared in-memory AgentService (singleton)
-          ▼
-┌──────────────────┐
-│  HTTPListener    │  Python HTTPServer — agent beacon handler
-│  (per-listener   │  (one thread per listener, configurable port)
-│   daemon thread) │
-└────────┬─────────┘
-         │  HTTP POST every 5 s
-         │  Authorization: Bearer <base64(metadata_json)>
-         │  Body: {"results": "<base64(task_results_json)>"}
-         ▼
-   Agent (Python or Windows DLL)
+┌──────────────────────────────────────────────────────┐
+│                    TeamServer                        │
+│  Flask API — agents · listeners · builder            │
+│                                                      │
+│  app.extensions                                      │
+│  ┌───────────────┐  ┌──────────────────┐             │
+│  │  AgentService │  │ ListenerService  │             │
+│  │  (DB-backed,  │  │  (thread-safe    │             │
+│  │  thread-safe) │  │   list)          │             │
+│  └───────┬───────┘  └──────────────────┘             │
+│          │           ┌──────────────────┐             │
+│          │           │  BuilderService  │             │
+│          │           │  (DB-backed,     │             │
+│          │           │  async patcher)  │             │
+│          │           └──────────────────┘             │
+│          │                                            │
+│  ┌───────▼────────────────────────────────────────┐  │
+│  │              SQLite (c2.db)                    │  │
+│  │  agents · pending_tasks · results · builds     │  │
+│  └────────────────────────────────────────────────┘  │
+└──────────────────────┬───────────────────────────────┘
+                       │  injected agent_service
+                       ▼
+┌──────────────────────────────────────────┐
+│  HTTPListener  (ThreadingHTTPServer)     │
+│  (per-listener daemon thread,            │
+│   configurable port)                     │
+│  Handler created via make_handler(svc)   │
+└────────────────┬─────────────────────────┘
+                 │  HTTP POST every 5 s
+                 │  Authorization: Bearer <base64(metadata_json)>
+                 │  Body: {"results": "<base64(task_results_json)>"}
+                 ▼
+          Agent (Python or Windows DLL)
 ```
 
 **Beacon cycle:**
 1. Agent sends `POST /` to the HTTP listener with its metadata in the `Authorization` header and any pending task results in the body.
-2. Listener registers the agent on first contact; on subsequent beacons it records `lastseen` and stores results.
-3. Listener responds with `{"tasks": [...]}` — the agent executes each task and queues results for the next beacon.
+2. Listener registers the agent on first contact via `AgentService.add_agent()`; on subsequent beacons it calls `checkin_agent()` (updates `lastseen` in DB) and `record_results()` (persists results).
+3. `pop_pending_tasks()` drains the agent's task queue and deletes those tasks from the DB; the tasks are returned to the agent in the response.
+4. All agent, task, and result state survives a TeamServer restart.
 
 ---
 
@@ -88,20 +99,21 @@ Flask REST API consumed by the operator frontend and the HTTP listener.
 
 | File | Purpose |
 |------|---------|
-| `main.py` | App factory — registers blueprints, runs on port 8000 |
-| `Controllers/agent_controller.py` | Agent CRUD, task queueing, result retrieval |
-| `Controllers/listeners_controller.py` | Listener lifecycle (create, list, remove) |
-| `Controllers/builder_controller.py` | Agent builder — check DLL availability, patch & serve |
-| `Services/agent_service.py` | Thread-safe in-memory agent store (singleton + `threading.Lock`) |
-| `Services/listeners_service.py` | In-memory listener store (singleton) |
-| `Services/builder_service.py` | Binary patcher — finds four magic markers in DLL (host, port, sleep, jitter) and overwrites them |
+| `main.py` | App factory — initialises DB + services in `app.extensions`, registers blueprints, runs on port 8000 |
+| `Database/database.py` | SQLite persistence (WAL mode, thread-safe) — agents, pending_tasks, results, builds |
+| `Controllers/agent_controller.py` | Agent CRUD, task queueing, result retrieval; services from `current_app.extensions` |
+| `Controllers/listeners_controller.py` | Listener lifecycle — passes `agent_service` to each new `HTTPListener` |
+| `Controllers/builder_controller.py` | Agent builder — check DLL availability, queue patch & serve |
+| `Services/agent_service.py` | Thread-safe agent store; loads from DB on startup; exposes `add_task`, `pop_pending_tasks`, `record_results`, `checkin_agent` |
+| `Services/listeners_service.py` | Thread-safe listener store |
+| `Services/builder_service.py` | Binary patcher — finds four magic markers in DLL and overwrites them; runs in background thread; persists builds to DB |
 | `Models/Agent/` | `Agent`, `AgentMetadata`, `Task`, `TaskResult` |
-| `Models/Listener/` | `Listener` ABC, `HTTPListener`, `HTTPRequestHandler` |
-| `Models/Build/` | `Build` dataclass, `BuildStatus` enum |
+| `Models/Listener/` | `Listener` ABC, `HTTPListener` (ThreadingHTTPServer), `make_handler()` factory |
+| `Models/Build/` | `Build` dataclass + `Build.from_row()`, `BuildStatus` enum |
 
 ### HTTP Listener (inside TeamServer)
 
-Runs as a `threading.Thread` daemon alongside the Flask API. Each created listener is an independent `HTTPServer` on its own port. The listener shares the `AgentService` singleton with the Flask API so agents are visible to the operator immediately.
+Runs as a `threading.Thread` daemon alongside the Flask API. Each created listener is an independent `ThreadingHTTPServer` on its own port — concurrent agent beacons are handled on separate threads. The `make_handler(agent_service)` factory injects the service into the handler class so no global state is needed.
 
 ### Python Agent (`Agent/`)
 
@@ -127,14 +139,14 @@ Cross-platform implant (Linux / macOS).
 | `ps` | List running processes |
 | `mkdir <path>` | Create directory |
 | `rmdir <path>` | Remove directory |
-| `download <path>` | Read a file from the agent's filesystem and send it to the operator — result appears as a **Save** button in the console |
-| `upload <dest_path>` | Write a file from the operator's machine to `<dest_path>` on the agent — select the file in the console's file picker before sending |
-| `make_token <user> <domain> <pass>` | Create a Windows access token with plaintext credentials (`LogonUserA` / `LOGON32_LOGON_NEW_CREDENTIALS`) and impersonate it on the current thread. Equivalent to `runas /netonly` — local identity unchanged, new credentials used for outbound network access. The console shows `***` in place of the password. |
-| `steal_token <pid>` | Duplicate the primary token of the target process (`OpenProcessToken` → `DuplicateTokenEx`) and impersonate it on the current thread. Requires at least `SeImpersonatePrivilege`. |
-| `rev2self` | Drop any active impersonation and revert the thread to its original security context (`RevertToSelf`). Also closes the handle stored by `make_token`. |
-| `set_sleep <interval_ms> <jitter_ms>` | Adjust the beacon interval and jitter at runtime — takes effect on the next beacon cycle |
+| `download <path>` | Read a file and send it to the operator — result appears as a **Save** button in the console |
+| `upload <dest_path>` | Write a file from the operator's machine to `<dest_path>` on the agent |
+| `make_token <user> <domain> <pass>` | Create a Windows access token with plaintext credentials (`LogonUserA` / `LOGON32_LOGON_NEW_CREDENTIALS`) and impersonate it on the current thread. Console shows `***` in place of the password. |
+| `steal_token <pid>` | Duplicate the primary token of the target process (`OpenProcessToken` → `DuplicateTokenEx`) and impersonate it |
+| `rev2self` | Drop any active impersonation and revert the thread to its original security context (`RevertToSelf`) |
+| `set_sleep <interval_ms> <jitter_ms>` | Adjust the beacon interval and jitter at runtime |
 
-> `inline-assembly` is Windows-only and is not available in the Python agent.
+> `inline-assembly` and `bof` are Windows-only and are not available in the Python agent.
 
 ### Windows Agent (`AgentWindows/`)
 
@@ -144,15 +156,16 @@ C++ Visual Studio project that builds a **DLL**. When injected into a process, `
 |------|---------|
 | `main.cpp` | `DllMain` entry point + `AgentThread` worker |
 | `AgentConfig.cpp` / `AgentConfig.h` | Four magic-prefixed config arrays (host, port, sleep ms, jitter ms) patched by TeamServer at build time |
-| `Agent.cpp` / `Agent.h` | Task queue, result queue, command dispatch |
-| `HTTPCommunicationModule.cpp` / `.h` | HTTP beaconing loop (WinHTTP) — interruptible sleep with jitter via `WaitForSingleObject` |
+| `Agent.cpp` / `Agent.h` | Task queue, result queue; all commands registered as `std::function<std::string(const Task&)>` lambdas in `loadCommands()` |
+| `HTTPCommunicationModule.cpp` / `.h` | HTTP beaconing loop — interruptible sleep with jitter via `WaitForSingleObject` |
 | `HttpClient.cpp` / `.h` | Low-level WinHTTP wrapper |
-| `Helpers.cpp` / `.h` | Base64, JSON helpers, system-info (hostname, arch, integrity level) |
+| `Helpers.cpp` / `.h` | Base64, JSON helpers, system-info (hostname, arch, integrity level); parses `file` and `file2` from task JSON |
 | `Commands.h` | Command function declarations |
 | `Whoami.cpp`, `Shell.cpp`, `Run.cpp`, `Pwd.cpp`, `Cd.cpp`, `Ls.cpp` | Built-in command implementations |
 | `Download.cpp` / `.h` | Read a file via `CreateFileA` + `ReadFile` and return it base64-encoded |
 | `Upload.cpp` / `.h` | Decode the base64 payload from the task and write it via `CreateFileA` + `WriteFile` |
 | `InlineAssembly.cpp` / `.h` | Load and run a .NET assembly in-memory via `ICLRMetaHost` / `ICorRuntimeHost`; stdout captured with a pipe |
+| `BOF.cpp` / `.h` | Execute COFF/BOF files in-memory; packs arguments in Cobalt Strike BOF format (`BeaconDataExtract` compatible) |
 
 **Built-in commands (Windows agent)**
 
@@ -167,10 +180,11 @@ C++ Visual Studio project that builds a **DLL**. When injected into a process, `
 | `download <path>` | Read a file from the agent's filesystem and send it to the operator |
 | `upload <dest_path>` | Write a file from the operator's machine to `<dest_path>` on the agent |
 | `make_token <user> <domain> <pass>` | Create a token with plaintext credentials and impersonate it (`LogonUserA` + `ImpersonateLoggedOnUser`) |
-| `steal_token <pid>` | Steal the token of a running process by PID and impersonate it (`OpenProcessToken` → `DuplicateTokenEx` → `ImpersonateLoggedOnUser`) |
+| `steal_token <pid>` | Steal the token of a running process by PID (`OpenProcessToken` → `DuplicateTokenEx` → `ImpersonateLoggedOnUser`) |
 | `rev2self` | Drop any active impersonation and restore the original thread security context (`RevertToSelf`) |
-| `set_sleep <interval_ms> <jitter_ms>` | Adjust the beacon interval and jitter at runtime — takes effect on the next beacon cycle |
-| `inline-assembly [args…]` | Execute a .NET EXE or DLL **in-memory** via CLR hosting (`ICLRMetaHost` / `ICorRuntimeHost`). The assembly is loaded into a new AppDomain with `AppDomain::Load_3`; stdout is captured through an anonymous pipe and returned as the command output. Select the assembly in the frontend file picker; optional arguments are forwarded to `Main`. Requires .NET Framework 4.x in the target process. |
+| `set_sleep <interval_ms> <jitter_ms>` | Adjust the beacon interval and jitter at runtime |
+| `inline-assembly [args…]` | Execute a .NET EXE or DLL **in-memory** via CLR hosting (`ICLRMetaHost` / `ICorRuntimeHost`). Select the assembly in the file picker; optional arguments are forwarded to `Main`. Requires .NET Framework 4.x in the target process. |
+| `bof [args…]` | Execute a **COFF/BOF** (Beacon Object File) **in-memory** without touching disk. Arguments are packed in Cobalt Strike BOF format and readable via `BeaconDataExtract`. An optional second file (e.g. a reflective DLL) can be attached and is prepended to the argument pack as a raw binary blob. |
 
 **Binary patching** — `AgentConfig.cpp` embeds four magic-prefixed arrays in the `.data` section of the DLL:
 
@@ -181,21 +195,19 @@ AGENT_C2_SLEEP_MS_CFG: [0xDE AD BE EF C2 C2 C2 C4] [sleep ms string, null-padded
 AGENT_C2_JITTER_MS_CFG:[0xDE AD BE EF C2 C2 C2 C5] [jitter ms string,null-padded to  8 bytes]
 ```
 
-The TeamServer's `BuilderService._patch_dll()` scans the compiled DLL bytes for each 8-byte magic prefix and overwrites the payload bytes that follow with the operator-supplied values. No recompilation needed.
-
-The agent reads all four values at startup via `GetAgentHost()`, `GetAgentPort()`, `GetBeaconSleepMs()`, and `GetBeaconJitterMs()` (inline helpers in `AgentConfig.h`). The beacon interval and jitter can also be changed at runtime with `set_sleep`.
+`BuilderService._patch_dll()` scans the compiled DLL bytes for each 8-byte magic prefix and overwrites the payload bytes. Patching runs in a background thread; poll `GET /builder/{id}` to check status.
 
 ### Frontend (`c2-frontend/`)
 
-React 19 + TypeScript operator UI. MUI v7 dark theme. No global state manager — each component manages its own state and calls the API directly.
+React 19 + TypeScript operator UI. MUI v7 dark theme. Shared `AppContext` provides agent/listener counts and connection status to `StatusBar` without duplicating API calls.
 
 | Route | Component | Purpose |
 |-------|-----------|---------|
 | `/` | `Dashboard` | Split-panel overview — agents (top 60%) + listeners (bottom 40%), auto-refreshes every 30 s |
-| `/agents` | `Agents` | Agent table — status dot, metadata, interact / check-in / remove actions |
-| `/agent/:id` | `AgentDetail` | Terminal console — send tasks, poll results every 5 s, quick-command chips |
+| `/agents` | `Agents` | Agent table — status dot, metadata, interact / check-in / remove; paginated at 15 rows |
+| `/agent/:id` | `AgentDetail` | Terminal console — send tasks, poll results every 5 s, quick-command chips, ArrowUp/Down command history, 10 MB file size limit |
 | `/listeners` | `Listeners` | Create / remove HTTP listeners |
-| `/builder` | `Builder` | Patch pre-compiled DLL with listener host/port/sleep/jitter, download result |
+| `/builder` | `Builder` | Patch pre-compiled DLL; auto-polls every 3 s while any build is pending or running |
 
 ---
 
@@ -230,6 +242,11 @@ cd TeamServer
 python main.py
 # API:     http://127.0.0.1:8000
 # Swagger: http://127.0.0.1:8000/apidocs
+```
+
+Enable debug logging by setting `FLASK_DEBUG=1` before starting:
+```bash
+FLASK_DEBUG=1 python main.py
 ```
 
 ### 2. Create a listener
@@ -290,7 +307,7 @@ The TeamServer checks this folder at startup. The Builder page shows a ✓/✗ i
 3. Set **Sleep (ms)** — beacon interval (minimum 100 ms, default 5000).
 4. Set **Jitter (ms)** — random ± offset applied each cycle (must be less than sleep, default 1000).
 5. Select the target **Architecture** (only architectures with a base DLL are enabled).
-6. Click **Build** — patching completes instantly.
+6. Click **Build** — patching runs in the background; the status dot in the table turns green when done.
 7. Click the download icon to save the ready-to-deploy DLL.
 
 ### Deploying the DLL
@@ -301,18 +318,16 @@ Inject the downloaded DLL into any Windows process using your preferred injectio
 
 ## Configuration
 
-All configuration is currently hardcoded. Key values to change:
-
 | Location | Setting | Default |
 |----------|---------|---------|
-| `TeamServer/main.py:29` | TeamServer API port | `8000` |
+| `TeamServer/main.py` | TeamServer API port | `8000` |
 | `Agent/main.py:25` | Listener host (Python agent) | `localhost` |
 | `Agent/main.py:25` | Listener port (Python agent) | `8080` |
 | `AgentWindows/AgentWindows/AgentConfig.cpp` | Default host in base DLL | `172.16.97.1` |
 | `AgentWindows/AgentWindows/AgentConfig.cpp` | Default port in base DLL | `8080` |
 | `AgentWindows/AgentWindows/AgentConfig.cpp` | Default beacon sleep in base DLL | `5000` ms |
 | `AgentWindows/AgentWindows/AgentConfig.cpp` | Default beacon jitter in base DLL | `1000` ms |
-| `c2-frontend/src/services/api.ts:54` | TeamServer base URL | `http://localhost:8000` |
+| `c2-frontend/.env` | TeamServer base URL | `http://localhost:8000` |
 
 The base DLL defaults in `AgentConfig.cpp` only matter for manual runs directly from Visual Studio; they are always overwritten by the patcher before delivery.
 
@@ -327,17 +342,17 @@ Interactive docs: `http://localhost:8000/apidocs`
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/agents/` | List all agents |
+| `GET` | `/agents/` | List all agents (includes `lastseen`) |
 | `GET` | `/agents/{id}` | Get agent by ID |
 | `POST` | `/agents/` | Register an agent manually (body: metadata JSON) |
 | `DELETE` | `/agents/{id}` | Remove agent |
 | `POST` | `/agents/{id}/checkin` | Mark agent last-seen as now |
 | `POST` | `/agents/{id}/checkout` | Clear agent last-seen (mark offline) |
-| `POST` | `/agents/{id}/task` | Queue a task `{command, arguments, file?}` |
+| `POST` | `/agents/{id}/task` | Queue a task `{command, arguments, file?, file2?, filename?}` |
 | `GET` | `/agents/{id}/tasks` | List all queued tasks |
 | `GET` | `/agents/{id}/results` | List all task results |
 | `GET` | `/agents/{id}/results/{task_id}` | Get result for a specific task |
-| `GET` | `/agents/{id}/results/{task_id}/file` | Download the file returned by a `download` task (serves raw bytes with `Content-Disposition: attachment`) |
+| `GET` | `/agents/{id}/results/{task_id}/file` | Download the file returned by a `download` task |
 
 ### Listeners
 
@@ -354,9 +369,9 @@ Interactive docs: `http://localhost:8000/apidocs`
 |--------|------|-------------|
 | `GET` | `/builder/check` | Check which arch DLLs are available for patching |
 | `GET` | `/builder/` | List all builds |
-| `POST` | `/builder/` | Patch a DLL — body: `{host, port, arch, sleep_ms?, jitter_ms?}` → returns Build |
-| `GET` | `/builder/{id}` | Get build status and metadata |
-| `GET` | `/builder/{id}/download` | Download the patched DLL |
+| `POST` | `/builder/` | Queue a patch — body: `{host, port, arch, sleep_ms?, jitter_ms?}` → `202 Accepted` |
+| `GET` | `/builder/{id}` | Get build status (`pending` → `success` / `failed`) |
+| `GET` | `/builder/{id}/download` | Download the patched DLL (only when `status == success`) |
 | `DELETE` | `/builder/{id}` | Delete build record and artifact |
 
 ### Agent Beacon Protocol
@@ -378,7 +393,7 @@ Content-Type: application/json
 
 **Subsequent beacons** — response `200`:
 ```json
-{"tasks": [{"id": 1234, "command": "whoami", "arguments": [], "file": ""}]}
+{"tasks": [{"id": 123456, "command": "whoami", "arguments": [], "file": "", "file2": "", "filename": ""}]}
 ```
 
 ---
@@ -407,21 +422,20 @@ class MyCommand(Command):
 
 1. Declare in `Commands.h`:
    ```cpp
-   std::string MyCommand(std::vector<std::string> arguments);
+   std::string MyCommand(const std::vector<std::string>& arguments);
    ```
 2. Implement in a new `.cpp` file.
 3. Register in `Agent.cpp → loadCommands()`:
    ```cpp
-   commands["mycommand"] = &MyCommand;
+   commands["mycommand"] = [](const Task& t) { return MyCommand(t.arguments); };
    ```
 4. Add the `.cpp` to `AgentWindows.vcxproj` under `<ClCompile>`.
 
-> **Commands that need `task.file`** (e.g. `upload`) cannot use the standard function pointer map because the map signature only passes `arguments`. Special-case them directly in `Agent::executeTask()` before the map lookup:
-> ```cpp
-> if (task.command == "upload") {
->     command_output = Upload(task.arguments, task.file);
-> }
-> ```
+Commands that need `task.file` or `task.file2` (e.g. `upload`, `bof`) receive the full `Task` struct, so they access those fields directly in the lambda:
+```cpp
+commands["upload"] = [](const Task& t) { return Upload(t.arguments, t.file); };
+commands["bof"]    = [](const Task& t) { return RunBOF(t.arguments, t.file, t.file2); };
+```
 
 ---
 
@@ -433,28 +447,31 @@ C2/
 ├── .gitignore
 │
 ├── TeamServer/                        # Python/Flask REST API (port 8000)
-│   ├── main.py
+│   ├── main.py                        # App factory — DB + services in app.extensions
+│   ├── c2.db                          # SQLite database (git-ignored)
+│   ├── Database/
+│   │   └── database.py                # SQLite persistence layer (WAL, thread-safe)
 │   ├── Controllers/
-│   │   ├── agent_controller.py
+│   │   ├── agent_controller.py        # services via current_app.extensions
 │   │   ├── listeners_controller.py
 │   │   └── builder_controller.py
 │   ├── Services/
-│   │   ├── agent_service.py           # thread-safe singleton
-│   │   ├── listeners_service.py       # singleton
-│   │   └── builder_service.py         # binary patcher
+│   │   ├── agent_service.py           # DB-backed, thread-safe; no global singleton
+│   │   ├── listeners_service.py       # thread-safe list
+│   │   └── builder_service.py         # binary patcher, async background thread
 │   ├── Models/
 │   │   ├── Agent/
-│   │   │   ├── agent.py
+│   │   │   ├── agent.py               # results capped at 500, thread-safe
 │   │   │   ├── agent_metadata.py
 │   │   │   ├── task.py
-│   │   │   └── task_result.py
+│   │   │   └── task_result.py         # includes created_at
 │   │   ├── Build/
-│   │   │   └── build.py               # Build dataclass + BuildStatus enum
+│   │   │   └── build.py               # Build + Build.from_row() + BuildStatus enum
 │   │   └── Listener/
 │   │       ├── listener.py            # ABC
 │   │       └── http_listener/
-│   │           ├── httplistener.py    # HTTPServer wrapper
-│   │           └── http_handler.py    # beacon request handler
+│   │           ├── httplistener.py    # ThreadingHTTPServer; accepts agent_service
+│   │           └── http_handler.py    # make_handler(agent_service) factory
 │   └── builds/                        # patched DLL artifacts (git-ignored)
 │
 ├── Agent/                             # Python implant (Linux / macOS)
@@ -466,23 +483,13 @@ C2/
 │   │   ├── Task.py
 │   │   ├── TaskResult.py
 │   │   └── Commands/                  # auto-discovered via pkgutil
-│   │       ├── CdCommand.py
-│   │       ├── LsCommand.py
-│   │       ├── PwdCommand.py
-│   │       ├── ShellCommand.py
-│   │       ├── PsCommand.py
-│   │       ├── MkdirCommand.py
-│   │       ├── RmdirCommand.py
-│   │       ├── DownloadCommand.py
-│   │       ├── UploadCommand.py
-│   │       ├── MakeTokenCommand.py
-│   │       ├── StealTokenCommand.py
-│   │       └── Rev2SelfCommand.py
+│   │       └── *.py
 │   └── Modules/
 │       ├── comm.py                    # CommunicationModule ABC
 │       └── httpcomm.py               # HTTP beacon loop
 │
 ├── AgentWindows/                      # C++ Windows DLL implant
+│   ├── TODO.md                        # pending improvements backlog
 │   ├── AgentWindows.sln
 │   ├── dist/                          # pre-compiled base DLLs (git-ignored)
 │   │   ├── agent_x64.dll
@@ -492,34 +499,39 @@ C2/
 │       ├── AgentWindows.vcxproj
 │       ├── main.cpp                   # DllMain + AgentThread
 │       ├── AgentConfig.cpp / .h       # magic-marker config arrays
-│       ├── Agent.cpp / .h
+│       ├── Agent.cpp / .h             # loadCommands() — all commands as lambdas
 │       ├── HTTPCommunicationModule.cpp / .h
 │       ├── HttpClient.cpp / .h
-│       ├── Helpers.cpp / .h
+│       ├── Helpers.cpp / .h           # parses task.file and task.file2
 │       ├── Commands.h
 │       ├── Whoami.cpp, Shell.cpp, Run.cpp, Pwd.cpp, Cd.cpp, Ls.cpp
-│       ├── Download.cpp / .h          # download command (CreateFileA + ReadFile)
-│       ├── Upload.cpp / .h            # upload command (CreateFileA + WriteFile)
-│       ├── MakeToken.cpp / .h         # make_token (LogonUserA + ImpersonateLoggedOnUser)
-│       ├── StealToken.cpp / .h        # steal_token (OpenProcessToken + DuplicateTokenEx)
-│       ├── Rev2Self.cpp / .h          # rev2self (RevertToSelf)
-│       └── InlineAssembly.cpp / .h    # inline-assembly (.NET in-memory via CLR hosting)
+│       ├── Download.cpp / .h
+│       ├── Upload.cpp / .h
+│       ├── MakeToken.cpp / .h
+│       ├── StealToken.cpp / .h
+│       ├── Rev2Self.cpp / .h
+│       ├── InlineAssembly.cpp / .h    # .NET in-memory via CLR hosting
+│       └── BOF.cpp / .h               # COFF/BOF in-memory executor
 │
 ├── c2-frontend/                       # React 19 + TypeScript operator UI
+│   ├── .env                           # REACT_APP_API_URL=http://localhost:8000
 │   ├── src/
-│   │   ├── App.tsx                    # router: /, /agents, /agent/:id, /listeners, /builder
+│   │   ├── App.tsx                    # router wrapped in AppContextProvider
 │   │   ├── theme.ts                   # MUI dark theme
+│   │   ├── context/
+│   │   │   └── AppContext.tsx         # shared agentCount, listenerCount, connected
 │   │   ├── services/api.ts            # agentAPI, listenerAPI, builderAPI
 │   │   └── components/
 │   │       ├── Dashboard.tsx
-│   │       ├── Agents.tsx
-│   │       ├── AgentDetail.tsx
+│   │       ├── Agents.tsx             # 15-row pagination
+│   │       ├── AgentDetail.tsx        # command history, 10 MB file limit
 │   │       ├── Listeners.tsx
-│   │       ├── Builder.tsx
+│   │       ├── Builder.tsx            # polls every 3 s while builds are in progress
 │   │       ├── Sidebar.tsx
-│   │       └── StatusBar.tsx
+│   │       ├── Navbar.tsx
+│   │       └── StatusBar.tsx          # reads from AppContext
 │   └── CLAUDE.md                      # frontend-specific dev guidance
 │
 └── docs/
-    └── screenshots/                   # UI screenshots (captured via Playwright)
+    └── screenshots/                   # UI screenshots
 ```

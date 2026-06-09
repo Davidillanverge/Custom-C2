@@ -1,18 +1,11 @@
 import datetime
+import logging
 import shutil
 import threading
 from pathlib import Path
 
+from Database.database import Database
 from Models.Build.build import Build, BuildStatus
-
-
-def singleton(cls):
-    instances = {}
-    def get_instance(*args, **kwargs):
-        if cls not in instances:
-            instances[cls] = cls(*args, **kwargs)
-        return instances[cls]
-    return get_instance
 
 
 _THIS_DIR   = Path(__file__).parent
@@ -22,18 +15,15 @@ _REPO_ROOT  = _SERVER_DIR.parent
 BUILDS_DIR = _SERVER_DIR / "builds"
 DIST_DIR   = _REPO_ROOT / "AgentWindows" / "dist"
 
-# Magic markers embedded in the compiled DLL by AgentConfig.cpp.
-# Must match the byte literals in AgentConfig.cpp exactly.
 _HOST_MAGIC        = b'\xDE\xAD\xBE\xEF\xC2\xC2\xC2\xC2'
 _PORT_MAGIC        = b'\xDE\xAD\xBE\xEF\xC2\xC2\xC2\xC3'
 _SLEEP_MAGIC       = b'\xDE\xAD\xBE\xEF\xC2\xC2\xC2\xC4'
 _JITTER_MAGIC      = b'\xDE\xAD\xBE\xEF\xC2\xC2\xC2\xC5'
-_HOST_FIELD_SIZE   = 64  # bytes reserved after the magic (max 63-char string + null)
-_PORT_FIELD_SIZE   = 8   # bytes reserved after the magic (max 5-digit port + null)
-_SLEEP_FIELD_SIZE  = 8   # bytes reserved after the magic (max 7-digit ms + null)
-_JITTER_FIELD_SIZE = 8   # bytes reserved after the magic (max 7-digit ms + null)
+_HOST_FIELD_SIZE   = 64
+_PORT_FIELD_SIZE   = 8
+_SLEEP_FIELD_SIZE  = 8
+_JITTER_FIELD_SIZE = 8
 
-# Pre-compiled base DLLs, one per architecture, placed in AgentWindows/dist/
 _ARCH_DLL: dict[str, Path] = {
     "x64":   DIST_DIR / "agent_x64.dll",
     "x86":   DIST_DIR / "agent_x86.dll",
@@ -41,29 +31,36 @@ _ARCH_DLL: dict[str, Path] = {
 }
 
 
-@singleton
 class BuilderService:
-    def __init__(self):
+    def __init__(self, db: Database):
         self._builds: dict[str, Build] = {}
         self._lock = threading.Lock()
+        self._db = db
         BUILDS_DIR.mkdir(parents=True, exist_ok=True)
         DIST_DIR.mkdir(parents=True, exist_ok=True)
+        self._load_from_db()
+
+    def _load_from_db(self):
+        for row in self._db.load_builds():
+            build = Build.from_row(row)
+            self._builds[build.id] = build
 
     # ------------------------------------------------------------------ public
 
     def check(self) -> dict:
         archs = {arch: path.exists() for arch, path in _ARCH_DLL.items()}
-        return {
-            "available": any(archs.values()),
-            "archs": archs,
-        }
+        return {"available": any(archs.values()), "archs": archs}
 
     def create_build(self, host: str, port: int, arch: str, sleep_ms: int = 5000, jitter_ms: int = 1000) -> Build:
         build = Build(host, port, arch, sleep_ms, jitter_ms)
         with self._lock:
             self._builds[build.id] = build
-        # Patching is instant — run synchronously, no background thread needed
-        self._patch_build(build)
+        self._db.save_build(
+            build.id, build.host, build.port, build.arch,
+            build.sleep_ms, build.jitter_ms,
+            build.status.value, build.created_at.isoformat(),
+        )
+        threading.Thread(target=self._patch_build, args=(build,), daemon=True).start()
         return build
 
     def get_build(self, build_id: str) -> Build | None:
@@ -83,7 +80,10 @@ class BuilderService:
         if build_dir.exists():
             shutil.rmtree(build_dir, ignore_errors=True)
         with self._lock:
-            return self._builds.pop(build_id, None) is not None
+            removed = self._builds.pop(build_id, None) is not None
+        if removed:
+            self._db.delete_build(build_id)
+        return removed
 
     # ----------------------------------------------------------------- private
 
@@ -107,12 +107,18 @@ class BuilderService:
             with self._lock:
                 build.status      = BuildStatus.SUCCESS
                 build.finished_at = datetime.datetime.utcnow()
+            self._db.update_build(build.id, BuildStatus.SUCCESS.value, build.finished_at.isoformat())
 
         except Exception as e:
+            logging.error("Build %s failed: %s", build.id, e)
             with self._lock:
                 build.status      = BuildStatus.FAILED
                 build.finished_at = datetime.datetime.utcnow()
                 build.error_log   = str(e)
+            self._db.update_build(
+                build.id, BuildStatus.FAILED.value,
+                build.finished_at.isoformat(), str(e),
+            )
 
 
 def _patch_field(buf: bytearray, magic: bytes, value_bytes: bytes, field_size: int, field_name: str) -> None:

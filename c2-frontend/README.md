@@ -1,126 +1,96 @@
-# TeamServer Frontend
+# TeamServer C2 — Operator Frontend
 
-A modern React-based web interface for the TeamServer C2 (Command & Control) system.
+React 19 + TypeScript operator UI for the TeamServer C2 framework. MUI v7 dark theme styled after VS Code.
 
 ## Features
 
-- **Dashboard**: Real-time overview of agents and listeners
-- **Agent Management**: View, monitor, and control connected agents
-- **Task Management**: Send commands and view execution results
-- **Listener Management**: Create and manage communication listeners
-- **Dark Theme**: Professional C2 interface with dark theme
-- **Responsive Design**: Works on desktop and mobile devices
+- **Dashboard** — live overview of connected agents and active listeners, auto-refreshes every 30 s
+- **Agents** — full agent table with status indicators, last-seen timestamps, per-agent actions, paginated at 15 rows
+- **Agent Console** — terminal-style console with command history (ArrowUp / ArrowDown), quick-command chips, automatic result polling, file download support
+- **Listeners** — create and remove HTTP listeners
+- **Builder** — patch pre-compiled agent DLLs with listener host / port / sleep / jitter; polls for build status automatically
+- **Status bar** — connection state, agent and listener counts (shared via `AppContext`, no duplicate API calls)
 
 ## Tech Stack
 
-- **React 19** with TypeScript
-- **Material-UI (MUI)** for components
-- **React Router** for navigation
-- **Axios** for API communication
+- React 19 + TypeScript
+- Material-UI (MUI) v7
+- React Router v6
+- Axios
 
 ## Setup
 
-1. Install dependencies:
 ```bash
 npm install
+npm start        # dev server at http://localhost:3000
+npm run build    # production build
+npm test         # Jest / React Testing Library
 ```
 
-2. Set environment variables (optional):
-```bash
-# Create .env file in the root directory
-REACT_APP_API_URL=http://localhost:5000
+### Environment
+
+Create a `.env` file in this directory (already committed with default value):
+
+```
+REACT_APP_API_URL=http://localhost:8000
 ```
 
-3. Start the development server:
-```bash
-npm start
-```
+Change this if the TeamServer runs on a different host or port.
 
-The frontend will be available at `http://localhost:3000`
+## Routing
 
-## Usage
-
-### Dashboard
-- View real-time statistics of connected agents and listeners
-- Monitor agent status and activity
-- Quick overview of system health
-
-### Agents Section
-- Browse all connected agents with detailed information
-- View agent metadata (hostname, username, process, integrity, etc.)
-- Check agent online/offline status
-- Force agent check-ins
-- Delete disconnected agents
-
-### Agent Details
-- Detailed view of individual agents
-- Send custom commands to agents
-- View pending tasks and execution results
-- Monitor task completion in real-time
-
-### Listeners Section
-- View all active listeners
-- Create new HTTP listeners on specific ports
-- Stop and remove listeners
-- Monitor listener status
+| Path | Component | Description |
+|------|-----------|-------------|
+| `/` | `Dashboard` | Split-panel overview — agents (top 60%) + listeners (bottom 40%) |
+| `/agents` | `Agents` | Agent table with pagination (15 per page) |
+| `/agent/:id` | `AgentDetail` | Terminal console — send tasks, view results |
+| `/listeners` | `Listeners` | Manage HTTP listeners |
+| `/builder` | `Builder` | Generate patched agent DLLs |
 
 ## API Integration
 
-The frontend communicates with the TeamServer REST API:
+Base URL from `REACT_APP_API_URL` (default `http://localhost:8000`).
 
 **Agents:**
-- `GET /agents/` - List all agents
-- `GET /agents/{id}` - Get agent details
-- `DELETE /agents/{id}` - Remove agent
-- `POST /agents/{id}/checkin` - Force agent check-in
-- `POST /agents/{id}/task` - Send task to agent
-- `GET /agents/{id}/tasks` - Get agent tasks
-- `GET /agents/{id}/results` - Get task results
+- `GET /agents/` — list all agents (response includes `lastseen`)
+- `GET /agents/{id}` — get agent details
+- `DELETE /agents/{id}` — remove agent
+- `POST /agents/{id}/checkin` — force agent check-in
+- `POST /agents/{id}/task` — send task `{command, arguments, file?, file2?, filename?}`
+- `GET /agents/{id}/tasks` — get agent tasks
+- `GET /agents/{id}/results` — get task results
+- `GET /agents/{id}/results/{task_id}/file` — download file result
 
 **Listeners:**
-- `GET /listeners/` - List all listeners
-- `POST /listeners/create` - Create new listener
-- `DELETE /listeners/remove` - Remove listener
+- `GET /listeners/` — list all listeners
+- `POST /listeners/create` — create new listener `{name, type, port}`
+- `DELETE /listeners/remove` — remove listener `{name}`
 
-## Development
+**Builder:**
+- `GET /builder/check` — DLL availability per architecture
+- `GET /builder/` — list all builds
+- `POST /builder/` — queue build `{host, port, arch, sleep_ms, jitter_ms}` → `202 Accepted`
+- `GET /builder/{id}` — get build status (`pending` → `success` / `failed`)
+- `GET /builder/{id}/download` — download patched DLL
+- `DELETE /builder/{id}` — delete build
 
-### Available Scripts
-
-- `npm start` - Start development server
-- `npm build` - Build for production
-- `npm test` - Run tests
-- `npm eject` - Eject from Create React App
-
-### Project Structure
+## Project Structure
 
 ```
 src/
-├── components/          # React components
-│   ├── Navbar.tsx      # Navigation bar
-│   ├── Dashboard.tsx   # Main dashboard
-│   ├── Agents.tsx      # Agent management
-│   ├── AgentDetail.tsx # Individual agent view
-│   ├── Listeners.tsx   # Listener management
-│   └── index.ts        # Component exports
-├── services/           # API services
-│   └── api.ts          # API client and types
-├── App.tsx             # Main app component
-└── index.tsx           # App entry point
+├── App.tsx                    # router wrapped in AppContextProvider
+├── theme.ts                   # MUI dark theme
+├── context/
+│   └── AppContext.tsx          # shared agentCount, listenerCount, connected; polls every 30 s
+├── services/
+│   └── api.ts                 # agentAPI, listenerAPI, builderAPI + TypeScript interfaces
+└── components/
+    ├── Dashboard.tsx           # split-panel overview
+    ├── Agents.tsx              # paginated agent table
+    ├── AgentDetail.tsx         # terminal console; command history; 10 MB file limit
+    ├── Listeners.tsx           # listener management
+    ├── Builder.tsx             # builder with async status polling
+    ├── Sidebar.tsx             # navigation
+    ├── Navbar.tsx              # top navigation bar
+    └── StatusBar.tsx           # reads from AppContext
 ```
-
-## Security Notes
-
-This is a demonstration implementation. For production use:
-
-- Implement proper authentication
-- Add HTTPS communication
-- Validate all user inputs
-- Add rate limiting
-- Use environment variables for sensitive data
-- Implement proper error handling and logging
-
-## Prerequisites
-
-- Node.js 16+
-- npm or yarn
-- Running TeamServer backend (default: http://localhost:5000)

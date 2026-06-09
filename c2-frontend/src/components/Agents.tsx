@@ -6,7 +6,9 @@ import {
   TableBody,
   TableCell,
   TableContainer,
+  TableFooter,
   TableHead,
+  TablePagination,
   TableRow,
   IconButton,
   Tooltip,
@@ -16,6 +18,8 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { Visibility, PlayArrow, Delete, Refresh } from '@mui/icons-material';
 import { agentAPI, Agent } from '../services/api';
+
+const PAGE_SIZE = 15;
 
 const StatusDot: React.FC<{ lastseen?: string }> = ({ lastseen }) => {
   const color = !lastseen
@@ -35,6 +39,7 @@ const Agents: React.FC = () => {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [page, setPage] = useState(0);
   const [snackbar, setSnackbar] = useState<{
     open: boolean;
     message: string;
@@ -51,7 +56,8 @@ const Agents: React.FC = () => {
       setLoading(true);
       setAgents(await agentAPI.getAgents());
       setError('');
-    } catch {
+    } catch (e) {
+      console.warn('Failed to load agents:', e);
       setError('Failed to load agents');
     } finally {
       setLoading(false);
@@ -64,7 +70,8 @@ const Agents: React.FC = () => {
       await agentAPI.checkInAgent(agentId);
       setSnackbar({ open: true, message: 'Check-in sent', severity: 'success' });
       loadAgents();
-    } catch {
+    } catch (e) {
+      console.warn('Check-in failed:', e);
       setSnackbar({ open: true, message: 'Failed to check in', severity: 'error' });
     }
   };
@@ -75,10 +82,13 @@ const Agents: React.FC = () => {
       await agentAPI.deleteAgent(agentId);
       setSnackbar({ open: true, message: 'Agent removed', severity: 'success' });
       loadAgents();
-    } catch {
+    } catch (e) {
+      console.warn('Delete agent failed:', e);
       setSnackbar({ open: true, message: 'Failed to remove agent', severity: 'error' });
     }
   };
+
+  const paged = agents.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -145,7 +155,7 @@ const Agents: React.FC = () => {
                 </TableCell>
               </TableRow>
             ) : (
-              agents.map((agent) => (
+              paged.map((agent) => (
                 <TableRow
                   key={agent.id}
                   onClick={() => navigate(`/agent/${agent.id}`)}
@@ -203,6 +213,20 @@ const Agents: React.FC = () => {
               ))
             )}
           </TableBody>
+          {agents.length > PAGE_SIZE && (
+            <TableFooter>
+              <TableRow>
+                <TablePagination
+                  rowsPerPage={PAGE_SIZE}
+                  rowsPerPageOptions={[PAGE_SIZE]}
+                  count={agents.length}
+                  page={page}
+                  onPageChange={(_, p) => setPage(p)}
+                  sx={{ color: '#858585', fontSize: '11px', border: 'none' }}
+                />
+              </TableRow>
+            </TableFooter>
+          )}
         </Table>
       </TableContainer>
 

@@ -1,35 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Typography } from '@mui/material';
-import { agentAPI, listenerAPI } from '../services/api';
+import { useAppContext } from '../context/AppContext';
 
 const StatusBar: React.FC = () => {
-  const [agentCount, setAgentCount] = useState(0);
-  const [listenerCount, setListenerCount] = useState(0);
-  const [connected, setConnected] = useState(false);
+  const { agentCount, listenerCount, connected } = useAppContext();
   const [time, setTime] = useState(new Date());
 
   useEffect(() => {
-    const fetchCounts = async () => {
-      try {
-        const [agents, listeners] = await Promise.all([
-          agentAPI.getAgents(),
-          listenerAPI.getListeners(),
-        ]);
-        setAgentCount(agents.length);
-        setListenerCount(listeners.length);
-        setConnected(true);
-      } catch {
-        setConnected(false);
-      }
-    };
-
-    fetchCounts();
-    const dataInterval = setInterval(fetchCounts, 30000);
-    const timeInterval = setInterval(() => setTime(new Date()), 1000);
-    return () => {
-      clearInterval(dataInterval);
-      clearInterval(timeInterval);
-    };
+    const interval = setInterval(() => setTime(new Date()), 1000);
+    return () => clearInterval(interval);
   }, []);
 
   const cell = {
