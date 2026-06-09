@@ -24,6 +24,7 @@ struct Task {
     std::string command;
     std::vector<std::string> arguments;
     std::string file;
+    std::string file2;   // optional second binary blob (for BOF)
 
     std::string to_json()const {
         std::string json = "{";
@@ -39,7 +40,8 @@ struct Task {
     }
     json += "], ";
 
-    json += "\"file\": \"" + file + "\"";
+    json += "\"file\": \"" + file + "\", ";
+    json += "\"file2\": \"" + file2 + "\"";
 
     json += "}";
 

@@ -203,7 +203,9 @@ def add_task(agent_id):
             id=random.randint(1000, 9999),  # Generar un ID aleatorio para la tarea
             command=task_data.get("command"),
             arguments=task_data.get("arguments"),
-            file=task_data.get("file")
+            file=task_data.get("file"),
+            file2=task_data.get("file2"),
+            filename=task_data.get("filename"),
         )
         agent.add_task(task)
         return {'message': 'Task added successfully'}, 200

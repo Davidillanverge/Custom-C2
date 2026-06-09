@@ -2,11 +2,13 @@ from typing import List
 
 
 class Task:
-    def __init__(self, id, command, arguments: List[str], file: bytes = None):
+    def __init__(self, id, command, arguments: List[str], file: bytes = None, file2: str = None, filename: str = None):
         self.id = id
         self.command = command
         self.arguments = arguments
         self.file = file
+        self.file2 = file2
+        self.filename = filename
 
     def get_id(self):
         return self.id
@@ -35,4 +37,6 @@ class Task:
             "command": self.command,
             "arguments": self.arguments,
             "file": self.file,
+            "file2": self.file2 or "",
+            "filename": self.filename or "",
         }

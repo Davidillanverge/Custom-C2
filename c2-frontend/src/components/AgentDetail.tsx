@@ -31,7 +31,9 @@ const AgentDetail: React.FC = () => {
   const [loadError, setLoadError] = useState('');
 
   const [selectedFile, setSelectedFile] = useState<{ name: string; base64: string } | null>(null);
+  const [selectedFile2, setSelectedFile2] = useState<{ name: string; base64: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef2 = useRef<HTMLInputElement>(null);
 
   const [makeTokenFields, setMakeTokenFields] = useState({ username: '', domain: '', password: '' });
   const [sleepFields, setSleepFields] = useState({ interval: '5000', jitter: '1000' });
@@ -79,10 +81,11 @@ const AgentDetail: React.FC = () => {
       ];
 
       for (const task of tasksData) {
+        const fileTag = task.filename ? ` [${task.filename}]` : '';
         initial.push({
           key: nextKey(),
           type: 'command',
-          content: [task.command, ...task.arguments].join(' '),
+          content: [task.command, ...task.arguments].join(' ') + fileTag,
           timestamp: new Date(),
         });
         const result = resultMap.get(task.id);
@@ -182,7 +185,9 @@ const AgentDetail: React.FC = () => {
       displayCmd = `set_sleep ${sleepFields.interval} ${sleepFields.jitter}`;
       taskArguments = [sleepFields.interval, sleepFields.jitter];
     } else {
-      displayCmd = args.trim() ? `${cmd} ${args.trim()}` : cmd;
+      const filePart = selectedFile ? ` [${selectedFile.name}]` : '';
+      const file2Part = selectedFile2 ? ` [${selectedFile2.name}]` : '';
+      displayCmd = `${cmd}${args.trim() ? ' ' + args.trim() : ''}${filePart}${file2Part}`;
       taskArguments = args.trim() ? args.trim().split(/\s+/) : [];
     }
 
@@ -190,6 +195,7 @@ const AgentDetail: React.FC = () => {
     setCommand('');
     setArgs('');
     setSelectedFile(null);
+    setSelectedFile2(null);
     setMakeTokenFields({ username: '', domain: '', password: '' });
     setSleepFields({ interval: '5000', jitter: '1000' });
 
@@ -198,6 +204,8 @@ const AgentDetail: React.FC = () => {
         command: cmd,
         arguments: taskArguments,
         file: selectedFile?.base64 ?? '',
+        file2: selectedFile2?.base64 ?? '',
+        filename: selectedFile?.name ?? '',
       });
     } catch {
       appendEntry('error', 'Failed to send task to agent');
@@ -207,6 +215,7 @@ const AgentDetail: React.FC = () => {
   const handleCommandChange = (value: string) => {
     setCommand(value);
     if (value !== 'upload' && value !== 'inline-assembly' && value !== 'bof') setSelectedFile(null);
+    if (value !== 'bof') setSelectedFile2(null);
     if (value !== 'make_token') setMakeTokenFields({ username: '', domain: '', password: '' });
     if (value !== 'set_sleep') setSleepFields({ interval: '5000', jitter: '1000' });
   };
@@ -223,6 +232,19 @@ const AgentDetail: React.FC = () => {
     };
     reader.readAsDataURL(file);
     // Reset so the same file can be re-selected
+    e.target.value = '';
+  };
+
+  const handleFileSelect2 = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const base64 = dataUrl.split(',')[1];
+      setSelectedFile2({ name: file.name, base64 });
+    };
+    reader.readAsDataURL(file);
     e.target.value = '';
   };
 
@@ -560,12 +582,18 @@ const AgentDetail: React.FC = () => {
             }}
           />
         )}
-        {/* Hidden file input */}
+        {/* Hidden file inputs */}
         <input
           type="file"
           ref={fileInputRef}
           style={{ display: 'none' }}
           onChange={handleFileSelect}
+        />
+        <input
+          type="file"
+          ref={fileInputRef2}
+          style={{ display: 'none' }}
+          onChange={handleFileSelect2}
         />
 
         {/* File picker — shown for upload, inline-assembly and bof commands */}
@@ -602,6 +630,49 @@ const AgentDetail: React.FC = () => {
                 <IconButton
                   size="small"
                   onClick={() => setSelectedFile(null)}
+                  sx={{ p: 0, color: '#555', '&:hover': { color: '#f44747' } }}
+                >
+                  <Clear sx={{ fontSize: 11 }} />
+                </IconButton>
+              </Box>
+            )}
+          </>
+        )}
+
+        {/* Second file picker — only for bof (optional binary blob argument) */}
+        {command.trim() === 'bof' && (
+          <>
+            <Tooltip title={selectedFile2 ? selectedFile2.name : 'Select 2nd file (optional)'}>
+              <IconButton
+                size="small"
+                onClick={() => fileInputRef2.current?.click()}
+                sx={{
+                  backgroundColor: selectedFile2 ? '#2d3a4a' : '#2d2d2d',
+                  color: selectedFile2 ? '#4e9af1' : '#555',
+                  borderRadius: '2px',
+                  p: 0.5,
+                  '&:hover': { backgroundColor: '#3c3c3c' },
+                }}
+              >
+                <AttachFile sx={{ fontSize: 14 }} />
+              </IconButton>
+            </Tooltip>
+            {selectedFile2 && (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, maxWidth: 140 }}>
+                <Typography
+                  sx={{
+                    fontSize: '11px',
+                    color: '#4e9af1',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {selectedFile2.name}
+                </Typography>
+                <IconButton
+                  size="small"
+                  onClick={() => setSelectedFile2(null)}
                   sx={{ p: 0, color: '#555', '&:hover': { color: '#f44747' } }}
                 >
                   <Clear sx={{ fontSize: 11 }} />

@@ -16,6 +16,8 @@ export interface Task {
   command: string;
   arguments: string[];
   file?: string;
+  file2?: string;
+  filename?: string;
 }
 
 export interface TaskResult {
@@ -80,7 +82,7 @@ export const agentAPI = {
 
   checkOutAgent: (id: number) => api.post(`/agents/${id}/checkout`),
 
-  sendTask: (agentId: number, task: { command: string; arguments: string[]; file?: string }) =>
+  sendTask: (agentId: number, task: { command: string; arguments: string[]; file?: string; file2?: string; filename?: string }) =>
     api.post(`/agents/${agentId}/task`, task),
 
   getTasks: (agentId: number) => api.get(`/agents/${agentId}/tasks`).then(res => res.data.tasks),

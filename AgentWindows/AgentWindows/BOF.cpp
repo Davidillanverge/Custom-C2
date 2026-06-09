@@ -340,8 +340,14 @@ _CLEANUP:
 //   [uint32 totalBlobSize][uint32 item1Len][item1 bytes]...
 // BeaconDataParse skips the first 4 bytes; BeaconDataExtract reads
 // a 4-byte length prefix before each item.
-static std::vector<BYTE> PackArguments(const std::vector<std::string>& args) {
+//
+// If binaryBlob is non-empty it is prepended as a raw binary entry
+// (no null terminator) so the BOF can call BeaconDataExtract to retrieve it
+// before reading the string arguments.
+static std::vector<BYTE> PackArguments(const std::vector<std::string>& args, const std::string& binaryBlob = "") {
     ULONG total = 4; // 4-byte header
+    if (!binaryBlob.empty())
+        total += 4 + (ULONG)binaryBlob.size(); // len prefix + raw bytes
     for (const auto& a : args)
         total += 4 + (ULONG)a.size() + 1; // len prefix + string + null
 
@@ -349,6 +355,14 @@ static std::vector<BYTE> PackArguments(const std::vector<std::string>& args) {
     memcpy(buf.data(), &total, 4);
 
     BYTE* ptr = buf.data() + 4;
+
+    if (!binaryBlob.empty()) {
+        ULONG len = (ULONG)binaryBlob.size();
+        memcpy(ptr, &len, 4);           ptr += 4;
+        memcpy(ptr, binaryBlob.data(), len);
+        ptr += len;
+    }
+
     for (const auto& a : args) {
         ULONG len = (ULONG)a.size() + 1;
         memcpy(ptr, &len, 4); ptr += 4;
@@ -360,7 +374,7 @@ static std::vector<BYTE> PackArguments(const std::vector<std::string>& args) {
 }
 
 // ── Public entry point ────────────────────────────────────────────────────────
-std::string RunBOF(std::vector<std::string> arguments, const std::string& file_data) {
+std::string RunBOF(std::vector<std::string> arguments, const std::string& file_data, const std::string& file2_data) {
     if (file_data.empty())
         return "Error: no BOF data";
 
@@ -374,7 +388,11 @@ std::string RunBOF(std::vector<std::string> arguments, const std::string& file_d
     std::string output;
     g_bofOut = &output;
 
-    std::vector<BYTE> packedArgs = PackArguments(arguments);
+    std::string binaryBlob;
+    if (!file2_data.empty())
+        binaryBlob = base64_decode(file2_data);
+
+    std::vector<BYTE> packedArgs = PackArguments(arguments, binaryBlob);
     PBYTE pArgs = packedArgs.empty() ? nullptr : packedArgs.data();
     ULONG uArgc = (ULONG)packedArgs.size();
 

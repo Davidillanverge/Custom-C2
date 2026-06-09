@@ -65,12 +65,24 @@ Task json2Task(const std::string& json) {
         }
     }
 
-    // file
+    // file — use quote-based extraction so trailing fields don't corrupt the value
     pos = json.find("\"file\"");
     if (pos != std::string::npos) {
         size_t colon = json.find(":", pos);
-        size_t end = json.find("}", colon);
-        task.file = trim(json.substr(colon + 1, end - colon - 1));
+        size_t q1    = json.find("\"", colon + 1);
+        size_t q2    = (q1 != std::string::npos) ? json.find("\"", q1 + 1) : std::string::npos;
+        if (q1 != std::string::npos && q2 != std::string::npos)
+            task.file = json.substr(q1 + 1, q2 - q1 - 1);
+    }
+
+    // file2
+    pos = json.find("\"file2\"");
+    if (pos != std::string::npos) {
+        size_t colon = json.find(":", pos);
+        size_t q1    = json.find("\"", colon + 1);
+        size_t q2    = (q1 != std::string::npos) ? json.find("\"", q1 + 1) : std::string::npos;
+        if (q1 != std::string::npos && q2 != std::string::npos)
+            task.file2 = json.substr(q1 + 1, q2 - q1 - 1);
     }
 
     return task;
